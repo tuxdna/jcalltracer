@@ -25,6 +25,7 @@
 #if !defined OPTION_SEP
 #define OPTION_SEP "="
 #endif
+
 #if !defined MAX_THREADS
 #define MAX_THREADS 1000
 #endif
@@ -144,6 +145,7 @@ void setup(char* options) {
   char **tmp;
   FILE *filterFile;
   char line[128];
+
   printf("Loading agent: libcalltracer5\n\n");
   for(i = 0; i < MAX_THREADS; i ++) {
     callStart[i] = NULL;
@@ -151,6 +153,7 @@ void setup(char* options) {
     currentCall[i] = NULL;
     threads[i] = NULL;
   }
+
   excFilters = NULL;
   incFilters = NULL;
 #if !defined JVMTI_TYPE
@@ -400,9 +403,12 @@ void releaseFullThreadTrace(threadIdType threadId, JNIEnv* jni_env) {
 void releaseFullTrace(JNIEnv* jni_env) {
   int i;
   threadIdType threadId;
+
   while(getLock(EXCLUSIVE_LOCK, &callTraceAccess) == -1) {
     delay(10);
-  }{
+  }
+
+  {
     for(i = 0; i < maxThreadIdx; i++) {
       threadId = getThreadId(i);
       if(threadId != NULL)
@@ -410,7 +416,9 @@ void releaseFullTrace(JNIEnv* jni_env) {
     }
     maxThreadIdx = 0;
     nextThreadIdx = 0;
-  } releaseLock(EXCLUSIVE_LOCK, &callTraceAccess);
+  }
+
+  releaseLock(EXCLUSIVE_LOCK, &callTraceAccess);
 }
 
 void printFullThreadTrace(threadIdType threadId, FILE *out, JNIEnv* jni_env);
@@ -451,7 +459,9 @@ callTraceDef *setCall(char* methodName, char* methodSignature, char* className, 
   callTraceDef ** temp;
   while(getLock(SHARED_LOCK, &callTraceAccess) == -1) {
     delay(10);
-  }{
+  }
+
+  {
     if(threadIdx == -1 || (callStartIdx[threadIdx] >= callThershold && callThershold > -1)) {
       free(call);
       releaseLock(SHARED_LOCK, &callTraceAccess);
@@ -490,7 +500,10 @@ callTraceDef *setCall(char* methodName, char* methodSignature, char* className, 
       }
     }
     currentCall[threadIdx] = call;
-  } releaseLock(SHARED_LOCK, &callTraceAccess);
+  }
+
+  releaseLock(SHARED_LOCK, &callTraceAccess);
+
   return call;
 }
 
@@ -529,7 +542,9 @@ callTraceDef *newMethodCall(methodIdType methodId, threadIdType threadId, JNIEnv
   callTraceDef *callTrace;
   while(getLock(SHARED_LOCK, &callTraceAccess) == -1) {
     delay(10);
-  }{
+  }
+
+  {
     classId = getMethodClass(methodId);
     if(classId == NULL) {
       releaseLock(SHARED_LOCK, &callTraceAccess);
@@ -542,7 +557,9 @@ callTraceDef *newMethodCall(methodIdType methodId, threadIdType threadId, JNIEnv
     callTrace = setCall(getMethodName(methodId), getMethodSignature(methodId), getClassName(classId), currentCall[threadIdx], newCallTrace(), threadIdx);
     releaseLock(SHARED_LOCK, &callTraceAccess);
     return callTrace;
-  } releaseLock(SHARED_LOCK, &callTraceAccess);
+  }
+
+  releaseLock(SHARED_LOCK, &callTraceAccess);
   return NULL;
 }
 
@@ -722,16 +739,19 @@ void printFullTrace(JNIEnv* jni_env) {
   int i;
   threadIdType threadId;
   FILE *out;
+
   while(getLock(EXCLUSIVE_LOCK, &callTraceAccess) == -1) {
     delay(10);
-  }{
+  }
+  
+  {
     out = fopen(traceFile, "w");
     if( out == NULL )
       out = stderr;
-    fprintf(out, "libcalltracer5\n");
-    fprintf(out, "********************************\n");
-    fprintf(out, "          Call Trace\n");
-    fprintf(out, "********************************\n\n");
+    /* fprintf(out, "libcalltracer5\n"); */
+    /* fprintf(out, "********************************\n"); */
+    /* fprintf(out, "          Call Trace\n"); */
+    /* fprintf(out, "********************************\n\n"); */
 
     for(i = 0; i < maxThreadIdx; i++) {
       threadId = getThreadId(i);
@@ -740,7 +760,9 @@ void printFullTrace(JNIEnv* jni_env) {
       }
     }
     fclose(out);
-  } releaseLock(EXCLUSIVE_LOCK, &callTraceAccess);
+  }
+
+  releaseLock(EXCLUSIVE_LOCK, &callTraceAccess);
 }
 
 #if !defined JVMTI_TYPE

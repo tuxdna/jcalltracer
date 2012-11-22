@@ -33,6 +33,7 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *options, void *reserved) {
     fprintf(stderr, "ERROR: Unable to create jvmtiEnv, GetEnv failed, error=%d\n", rc);
     return -1;
   }
+
   jvmti->GetCapabilities(&capabilities);
   capabilities.can_generate_method_entry_events = 1;
   capabilities.can_generate_method_exit_events = 1;
