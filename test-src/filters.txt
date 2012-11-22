@@ -1,2 +1,2 @@
 com.test
-!com.test.TestClass
+!com.test.HelloWorld

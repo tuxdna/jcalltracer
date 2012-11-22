@@ -4,7 +4,7 @@ SRC_DIR = src
 
 INCLUDES = -I$(SRC_DIR) -I$(JDK_HOME)/include -I$(JDK_HOME)/include/linux
 
-all: tags calltracer5.so test
+all: calltracer5.so
 
 # Generate a shared library
 # Make sure that #define JVMPI_TYPE and #define JVMTI_TYPE and #define TEST_MYTRACE are commented in ctrace.c file.
@@ -18,3 +18,6 @@ tags:
 
 clean:
 	rm -f *.so *.o calltracer5 TAGS
+
+docs:
+	maruku README.md
