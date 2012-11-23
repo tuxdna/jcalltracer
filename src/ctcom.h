@@ -40,22 +40,22 @@ typedef struct callTraceDef {
   int callIdx;
 } callTraceDef;
 
-#if !defined JVMTI_TYPE
-typedef struct methodDef {
-  methodIdType methodId;
-  char *methodName;
-  char *methodSignature;
-} methodDef;
-
-typedef struct classDef {
-  classIdType classId;
-  char *className;
-  int num_methods;
-  struct methodDef *methods;
-} classDef;
-
-struct classDef **classes;
-#endif
+//#if !defined JVMTI_TYPE
+//typedef struct methodDef {
+//  methodIdType methodId;
+//  char *methodName;
+//  char *methodSignature;
+//} methodDef;
+//
+//typedef struct classDef {
+//  classIdType classId;
+//  char *className;
+//  int num_methods;
+//  struct methodDef *methods;
+//} classDef;
+//
+//struct classDef **classes;
+//#endif
 
 typedef int LOCK_TYPE;
 typedef int LOCK_OBJECT;
@@ -436,7 +436,7 @@ int assignThreadIdx(threadIdType threadId, JNIEnv* jni_env) {
     oldThreadId = threads[nextThreadIdx];
     if(nextThreadIdx < maxThreadIdx) {
       newFile = (char *) calloc(strlen(traceFile) + 100, sizeof(char));
-      sprintf(newFile, "%s.%d", traceFile, (int) oldThreadId);
+      sprintf(newFile, "%s.%p", traceFile, oldThreadId);
       out = fopen(newFile, "a");
       if( out == NULL )
 	out = stderr;
@@ -454,7 +454,8 @@ int assignThreadIdx(threadIdType threadId, JNIEnv* jni_env) {
   } releaseLock(EXCLUSIVE_LOCK, &assignThreadAccess);
   return threadIdx;
 }
-#if defined JVMTI_TYPE
+
+// #if defined JVMTI_TYPE
 callTraceDef *setCall(char* methodName, char* methodSignature, char* className, callTraceDef* calledFrom, callTraceDef* call, int threadIdx) {
   callTraceDef ** temp;
   while(getLock(SHARED_LOCK, &callTraceAccess) == -1) {
@@ -513,25 +514,33 @@ callTraceDef *endCall(methodIdType methodId, threadIdType threadId, JNIEnv* jni_
   classIdType classId;
   while(getLock(SHARED_LOCK, &callTraceAccess) == -1) {
     delay(10);
-  }{
+  }
+
+  {
     classId = getMethodClass(methodId);
     if(classId == NULL) {
       releaseLock(SHARED_LOCK, &callTraceAccess);
       return NULL;
     }
+    
     threadIdx = getThreadIdx(threadId, jni_env);
     if(threadIdx == -1 || callStartIdx[threadIdx] <= 0 || (callStartIdx[threadIdx] >= callThershold && callThershold > -1)) {
       releaseLock(SHARED_LOCK, &callTraceAccess);
       return NULL;
     }
+    
     if(currentCall[threadIdx] != NULL && currentCall[threadIdx]->offset == 0) {
       currentCall[threadIdx] = currentCall[threadIdx]->calledFrom;
     } else if(currentCall[threadIdx] != NULL && currentCall[threadIdx]->offset > 0) {
       currentCall[threadIdx]->offset --;
     }
+    
     releaseLock(SHARED_LOCK, &callTraceAccess);
     return currentCall[threadIdx];
-  } releaseLock(SHARED_LOCK, &callTraceAccess);
+
+  }
+  releaseLock(SHARED_LOCK, &callTraceAccess);
+
   return NULL;
 }
 
@@ -550,10 +559,12 @@ callTraceDef *newMethodCall(methodIdType methodId, threadIdType threadId, JNIEnv
       releaseLock(SHARED_LOCK, &callTraceAccess);
       return NULL;
     }
+
     threadIdx = getThreadIdx(threadId, jni_env);
     if(threadIdx == -1) {
       threadIdx = assignThreadIdx(threadId, jni_env);
     }
+
     callTrace = setCall(getMethodName(methodId), getMethodSignature(methodId), getClassName(classId), currentCall[threadIdx], newCallTrace(), threadIdx);
     releaseLock(SHARED_LOCK, &callTraceAccess);
     return callTrace;
@@ -563,122 +574,132 @@ callTraceDef *newMethodCall(methodIdType methodId, threadIdType threadId, JNIEnv
   return NULL;
 }
 
-#else
-callTraceDef *setCall(char* methodName, char* methodSignature, char* className, callTraceDef* calledFrom, callTraceDef* call, int threadIdx) {
-  callTraceDef ** temp;
-  while(getLock(SHARED_LOCK, &callTraceAccess) == -1) {
-    delay(10);
-  }{
-    if(threadIdx == -1 || (callStartIdx[threadIdx] >= callThershold && callThershold > -1)) {
-      free(call);
-      releaseLock(SHARED_LOCK, &callTraceAccess);
-      return NULL;
-    }
-    if(calledFrom != NULL && (calledFrom->callIdx >= callThershold && callThershold > -1)) {
-      free(call);
-      calledFrom->offset++;
-      releaseLock(SHARED_LOCK, &callTraceAccess);
-      return NULL;
-    }
-    call->callIdx = 0;
-    call->offset = 0;
-    call->methodName = strdup(methodName);
-    call->methodSignature = strdup(methodSignature);
-    call->className = strdup(className);
-    call->calledFrom = calledFrom;
-    call->called = NULL;
-    if(calledFrom == NULL) {
-      temp = (callTraceDef **)realloc(callStart[threadIdx], (++ (callStartIdx[threadIdx])) * sizeof(callTraceDef *));
-      if (temp != NULL) {
-	callStart[threadIdx] = temp;
-	callStart[threadIdx][callStartIdx[threadIdx] - 1] = call;
-      }
-    } else {
-      temp = (callTraceDef **)realloc(calledFrom->called, (++ (calledFrom->callIdx)) * sizeof(callTraceDef *));
-      if (temp != NULL) {
-	calledFrom->called = temp; /* OK, assign new, larger storage to pointer */
-	calledFrom->called[calledFrom->callIdx - 1] = call;
-      } else {
-	free(call);
-	calledFrom->callIdx --;
-	calledFrom->offset++;
-	releaseLock(SHARED_LOCK, &callTraceAccess);
-	return NULL;
-      }
-    }
-    currentCall[threadIdx] = call;
-  } releaseLock(SHARED_LOCK, &callTraceAccess);
-  return call;
-}
+// #else
+//callTraceDef *setCall(char* methodName, char* methodSignature, char* className, callTraceDef* calledFrom, callTraceDef* call, int threadIdx) {
+//  callTraceDef ** temp;
+//  while(getLock(SHARED_LOCK, &callTraceAccess) == -1) {
+//    delay(10);
+//  }{
+//    if(threadIdx == -1 || (callStartIdx[threadIdx] >= callThershold && callThershold > -1)) {
+//      free(call);
+//      releaseLock(SHARED_LOCK, &callTraceAccess);
+//      return NULL;
+//    }
+//    if(calledFrom != NULL && (calledFrom->callIdx >= callThershold && callThershold > -1)) {
+//      free(call);
+//      calledFrom->offset++;
+//      releaseLock(SHARED_LOCK, &callTraceAccess);
+//      return NULL;
+//    }
+//    call->callIdx = 0;
+//    call->offset = 0;
+//    call->methodName = strdup(methodName);
+//    call->methodSignature = strdup(methodSignature);
+//    call->className = strdup(className);
+//    call->calledFrom = calledFrom;
+//    call->called = NULL;
+//    if(calledFrom == NULL) {
+//      temp = (callTraceDef **)realloc(callStart[threadIdx], (++ (callStartIdx[threadIdx])) * sizeof(callTraceDef *));
+//      if (temp != NULL) {
+//	callStart[threadIdx] = temp;
+//	callStart[threadIdx][callStartIdx[threadIdx] - 1] = call;
+//      }
+//    } else {
+//      temp = (callTraceDef **)realloc(calledFrom->called, (++ (calledFrom->callIdx)) * sizeof(callTraceDef *));
+//      if (temp != NULL) {
+//	calledFrom->called = temp; /* OK, assign new, larger storage to pointer */
+//	calledFrom->called[calledFrom->callIdx - 1] = call;
+//      } else {
+//	free(call);
+//	calledFrom->callIdx --;
+//	calledFrom->offset++;
+//	releaseLock(SHARED_LOCK, &callTraceAccess);
+//	return NULL;
+//      }
+//    }
+//    currentCall[threadIdx] = call;
+//  } releaseLock(SHARED_LOCK, &callTraceAccess);
+//  return call;
+//}
+//
+///*To be called when any method of a thread returns.*/
+//callTraceDef *endCall(methodIdType methodId, threadIdType threadId, JNIEnv* jni_env) {
+//  int threadIdx = -1;
+//  int i = 0;
+//  classIdType classId;
+//
+//  while(getLock(SHARED_LOCK, &classAccess) == -1) {
+//    delay(10);
+//  }
+//
+//  {
+//    classId = getMethodClass(methodId);
+//    for(i = 0; i < maxClassIdx; i ++) {
+//      if(classes[i] != NULL && isSameClass(jni_env, classes[i]->classId, classId)) {
+//
+//	while(getLock(SHARED_LOCK, &callTraceAccess) == -1) {
+//	  delay(10);
+//	}
+//
+//	{
+//	  threadIdx = getThreadIdx(threadId, jni_env);
+//	  if(threadIdx == -1 || callStartIdx[threadIdx] <= 0 || (callStartIdx[threadIdx] >= callThershold && callThershold > -1)) {
+//	    releaseLock(SHARED_LOCK, &callTraceAccess);
+//	    releaseLock(SHARED_LOCK, &classAccess);
+//	    return NULL;
+//	  }
+//	  if(currentCall[threadIdx] != NULL && currentCall[threadIdx]->offset == 0) {
+//	    currentCall[threadIdx] = currentCall[threadIdx]->calledFrom;
+//	  } else if(currentCall[threadIdx] != NULL && currentCall[threadIdx]->offset > 0) {
+//	    currentCall[threadIdx]->offset --;
+//	  }
+//	}
+//
+//	releaseLock(SHARED_LOCK, &callTraceAccess);
+//	releaseLock(SHARED_LOCK, &classAccess);
+//	return currentCall[threadIdx];
+//      }
+//    }
+//  }
+//
+//  releaseLock(SHARED_LOCK, &classAccess);
+//  return NULL;
+//}
+//
+///*To be called when a new method is invoked in a flow of a thread.*/
+//callTraceDef *newMethodCall(methodIdType methodId, threadIdType threadId, JNIEnv* jni_env) {
+//  classIdType classId;
+//  int i = 0, j = 0, threadIdx = -1;
+//  callTraceDef *callTrace;
+//  while(getLock(SHARED_LOCK, &classAccess) == -1) {
+//    delay(10);
+//  }{
+//    classId = getMethodClass(methodId);
+//    for(i = 0; i < maxClassIdx; i ++) {
+//      if(classes[i] != NULL && isSameClass(jni_env, classes[i]->classId, classId)) {
+//	for(j = 0; j < classes[i]->num_methods; j ++) {
+//	  if(classes[i]->methods != NULL && classes[i]->methods[j].methodId == methodId) {
+//	    while(getLock(SHARED_LOCK, &callTraceAccess) == -1) {
+//	      delay(10);
+//	    }{
+//	      threadIdx = getThreadIdx(threadId, jni_env);
+//	      if(threadIdx == -1) {
+//		threadIdx = assignThreadIdx(threadId, jni_env);
+//	      }
+//	      callTrace = setCall(classes[i]->methods[j].methodName, classes[i]->methods[j].methodSignature, classes[i]->className, currentCall[threadIdx], newCallTrace(), threadIdx);
+//	      releaseLock(SHARED_LOCK, &callTraceAccess);
+//	      releaseLock(SHARED_LOCK, &classAccess);
+//	      return callTrace;
+//	    } releaseLock(SHARED_LOCK, &callTraceAccess);
+//	  }
+//	}
+//      }
+//    }
+//  } releaseLock(SHARED_LOCK, &classAccess);
+//  return NULL;
+//}
 
-/*To be called when any method of a thread returns.*/
-callTraceDef *endCall(methodIdType methodId, threadIdType threadId, JNIEnv* jni_env) {
-  int threadIdx = -1;
-  int i = 0;
-  classIdType classId;
-  while(getLock(SHARED_LOCK, &classAccess) == -1) {
-    delay(10);
-  }{
-    classId = getMethodClass(methodId);
-    for(i = 0; i < maxClassIdx; i ++) {
-      if(classes[i] != NULL && isSameClass(jni_env, classes[i]->classId, classId)) {
-	while(getLock(SHARED_LOCK, &callTraceAccess) == -1) {
-	  delay(10);
-	}{
-	  threadIdx = getThreadIdx(threadId, jni_env);
-	  if(threadIdx == -1 || callStartIdx[threadIdx] <= 0 || (callStartIdx[threadIdx] >= callThershold && callThershold > -1)) {
-	    releaseLock(SHARED_LOCK, &callTraceAccess);
-	    releaseLock(SHARED_LOCK, &classAccess);
-	    return NULL;
-	  }
-	  if(currentCall[threadIdx] != NULL && currentCall[threadIdx]->offset == 0) {
-	    currentCall[threadIdx] = currentCall[threadIdx]->calledFrom;
-	  } else if(currentCall[threadIdx] != NULL && currentCall[threadIdx]->offset > 0) {
-	    currentCall[threadIdx]->offset --;
-	  }
-	} releaseLock(SHARED_LOCK, &callTraceAccess);
-	releaseLock(SHARED_LOCK, &classAccess);
-	return currentCall[threadIdx];
-      }
-    }
-  } releaseLock(SHARED_LOCK, &classAccess);
-  return NULL;
-}
-
-/*To be called when a new method is invoked in a flow of a thread.*/
-callTraceDef *newMethodCall(methodIdType methodId, threadIdType threadId, JNIEnv* jni_env) {
-  classIdType classId;
-  int i = 0, j = 0, threadIdx = -1;
-  callTraceDef *callTrace;
-  while(getLock(SHARED_LOCK, &classAccess) == -1) {
-    delay(10);
-  }{
-    classId = getMethodClass(methodId);
-    for(i = 0; i < maxClassIdx; i ++) {
-      if(classes[i] != NULL && isSameClass(jni_env, classes[i]->classId, classId)) {
-	for(j = 0; j < classes[i]->num_methods; j ++) {
-	  if(classes[i]->methods != NULL && classes[i]->methods[j].methodId == methodId) {
-	    while(getLock(SHARED_LOCK, &callTraceAccess) == -1) {
-	      delay(10);
-	    }{
-	      threadIdx = getThreadIdx(threadId, jni_env);
-	      if(threadIdx == -1) {
-		threadIdx = assignThreadIdx(threadId, jni_env);
-	      }
-	      callTrace = setCall(classes[i]->methods[j].methodName, classes[i]->methods[j].methodSignature, classes[i]->className, currentCall[threadIdx], newCallTrace(), threadIdx);
-	      releaseLock(SHARED_LOCK, &callTraceAccess);
-	      releaseLock(SHARED_LOCK, &classAccess);
-	      return callTrace;
-	    } releaseLock(SHARED_LOCK, &callTraceAccess);
-	  }
-	}
-      }
-    }
-  } releaseLock(SHARED_LOCK, &classAccess);
-  return NULL;
-}
-
-#endif
+// #endif
 
 void printCallTrace(callTraceDef* headNode, int depth, FILE *out) {
   int i = 0;
@@ -722,12 +743,12 @@ void printFullThreadTrace(threadIdType threadId, FILE *out, JNIEnv* jni_env) {
   if(threadIdx == -1)
     return;
   if(strcmp(output_type, "xml") == 0) {
-    fprintf(out, "\n<Thread id=\"%d\">\n", (int) threadId);
+    fprintf(out, "\n<Thread id=\"%p\">\n", threadId);
     for(i = 0; i < callStartIdx[threadIdx]; i++)
       printCallTrace(callStart[threadIdx][i], 0, out);
     fprintf(out, "</Thread>\n");
   } else {
-    fprintf(out, "\n------------Thread %d--------------\n", (int) threadId);
+    fprintf(out, "\n------------Thread %p--------------\n", threadId);
     for(i = 0; i < callStartIdx[threadIdx]; i++)
       printCallTrace(callStart[threadIdx][i], -1, out);
     fprintf(out, "\n\n");
@@ -765,115 +786,115 @@ void printFullTrace(JNIEnv* jni_env) {
   releaseLock(EXCLUSIVE_LOCK, &callTraceAccess);
 }
 
-#if !defined JVMTI_TYPE
-int getFreeIdx() {
-  int i;
-  for(i = 0; i < maxClassIdx; i+=100) {
-    if(classes[i] == NULL) {
-      break;
-    }
-  }
-  for(; i < maxClassIdx && i > 0; i-=10) {
-    if(classes[i] != NULL) {
-      break;
-    }
-  }
-  for(; i < maxClassIdx; i++) {
-    if(classes[i] == NULL) {
-      break;
-    }
-  }
-  if (i >= maxClassIdx)
-    return -1;
-  return i;
-}
-
-void freeClass(classDef *thisClass) {
-  int j;
-  if(thisClass != NULL) {
-    for(j = 0; j < thisClass->num_methods; j++) {
-      free(thisClass->methods[j].methodName);
-      free(thisClass->methods[j].methodSignature);
-    }
-    free(thisClass->methods);
-    free(thisClass->className);
-    free(thisClass);
-  }
-}
-
-/* To be called on class load.*/
-classDef *newClass(classIdType classId, const char * className, int num_methods, methodType *methods, JNIEnv* jni_env) {
-  classDef *thisClass = NULL;
-  classDef **tmp = NULL;
-  int idx = -1;
-  int i = 0;
-  classIdType classRef = getClassRef(jni_env, classId);
-  if(passFilter(className) == 1) {
-
-    thisClass = (classDef *)malloc(sizeof(classDef));
-    thisClass->classId = classRef;
-    thisClass->num_methods = num_methods;
-    thisClass->className = strdup(className);
-    thisClass->methods = (methodDef*)malloc(sizeof(methodDef) * (thisClass->num_methods));
-    for(i = 0; i < num_methods; i ++) {
-      thisClass->methods[i].methodId = methods[i].method_id;
-      thisClass->methods[i].methodName = strdup(methods[i].method_name);
-      thisClass->methods[i].methodSignature = strdup(methods[i].method_signature);
-    }
-    while(getLock(EXCLUSIVE_LOCK, &classAccess) == -1) {
-      delay(10);
-    }{
-      idx = getFreeIdx();
-      if(idx == -1) {
-	tmp = (classDef **) realloc(classes, (++ maxClassIdx) * sizeof(classDef *));
-	if(tmp != NULL) {
-	  classes = tmp;
-	  idx = maxClassIdx - 1;
-	} else {
-	  freeClass(thisClass);
-	  releaseLock(EXCLUSIVE_LOCK, &classAccess);
-	  return NULL;
-	}
-      }
-      classes[idx] = thisClass;
-    } releaseLock(EXCLUSIVE_LOCK, &classAccess);
-  }
-  return thisClass;
-}
-
-/* To be called on class unload.*/
-void freeClassId(classIdType classId, JNIEnv* jni_env) {
-  int j = 0;
-  int i = 0;
-  for(i = 0; i < maxClassIdx; i ++) {
-    if(classes[i] != NULL && isSameClass(jni_env, classes[i]->classId, classId)) {
-      freeClass(classes[i]);
-      while(getLock(EXCLUSIVE_LOCK, &classAccess) == -1) {
-	delay(10);
-      }{
-	for(j = i; (classes[j] != NULL || classes[j + 1] != NULL) && (i%100) != 0 && j < (((i/100)*100) + 100); j++) {
-	  classes[j] = classes[j + 1];
-	}
-	classes[j] = NULL;
-      } releaseLock(EXCLUSIVE_LOCK, &classAccess);
-      break;
-    }
-  }
-}
-
-/* To be called on JVM unload.*/
-void freeAllClasses() {
-  int j = 0;
-  int i = 0;
-  for(i = 0; i < maxClassIdx; i ++) {
-    for(j = 0; classes[i] != NULL && j < classes[i]->num_methods; j++) {
-      free(classes[i]->methods[j].methodName);
-      free(classes[i]->methods[j].methodSignature);
-    }
-    free(classes[i]->methods);
-    free(classes[i]->className);
-    free(classes[i]);
-  }
-  free(classes);
-}
-#endif
+//#if !defined JVMTI_TYPE
+//int getFreeIdx() {
+//  int i;
+//  for(i = 0; i < maxClassIdx; i+=100) {
+//    if(classes[i] == NULL) {
+//      break;
+//    }
+//  }
+//  for(; i < maxClassIdx && i > 0; i-=10) {
+//    if(classes[i] != NULL) {
+//      break;
+//    }
+//  }
+//  for(; i < maxClassIdx; i++) {
+//    if(classes[i] == NULL) {
+//      break;
+//    }
+//  }
+//  if (i >= maxClassIdx)
+//    return -1;
+//  return i;
+//}
+//
+//void freeClass(classDef *thisClass) {
+//  int j;
+//  if(thisClass != NULL) {
+//    for(j = 0; j < thisClass->num_methods; j++) {
+//      free(thisClass->methods[j].methodName);
+//      free(thisClass->methods[j].methodSignature);
+//    }
+//    free(thisClass->methods);
+//    free(thisClass->className);
+//    free(thisClass);
+//  }
+//}
+//
+///* To be called on class load.*/
+//classDef *newClass(classIdType classId, const char * className, int num_methods, methodType *methods, JNIEnv* jni_env) {
+//  classDef *thisClass = NULL;
+//  classDef **tmp = NULL;
+//  int idx = -1;
+//  int i = 0;
+//  classIdType classRef = getClassRef(jni_env, classId);
+//  if(passFilter(className) == 1) {
+//
+//    thisClass = (classDef *)malloc(sizeof(classDef));
+//    thisClass->classId = classRef;
+//    thisClass->num_methods = num_methods;
+//    thisClass->className = strdup(className);
+//    thisClass->methods = (methodDef*)malloc(sizeof(methodDef) * (thisClass->num_methods));
+//    for(i = 0; i < num_methods; i ++) {
+//      thisClass->methods[i].methodId = methods[i].method_id;
+//      thisClass->methods[i].methodName = strdup(methods[i].method_name);
+//      thisClass->methods[i].methodSignature = strdup(methods[i].method_signature);
+//    }
+//    while(getLock(EXCLUSIVE_LOCK, &classAccess) == -1) {
+//      delay(10);
+//    }{
+//      idx = getFreeIdx();
+//      if(idx == -1) {
+//	tmp = (classDef **) realloc(classes, (++ maxClassIdx) * sizeof(classDef *));
+//	if(tmp != NULL) {
+//	  classes = tmp;
+//	  idx = maxClassIdx - 1;
+//	} else {
+//	  freeClass(thisClass);
+//	  releaseLock(EXCLUSIVE_LOCK, &classAccess);
+//	  return NULL;
+//	}
+//      }
+//      classes[idx] = thisClass;
+//    } releaseLock(EXCLUSIVE_LOCK, &classAccess);
+//  }
+//  return thisClass;
+//}
+//
+///* To be called on class unload.*/
+//void freeClassId(classIdType classId, JNIEnv* jni_env) {
+//  int j = 0;
+//  int i = 0;
+//  for(i = 0; i < maxClassIdx; i ++) {
+//    if(classes[i] != NULL && isSameClass(jni_env, classes[i]->classId, classId)) {
+//      freeClass(classes[i]);
+//      while(getLock(EXCLUSIVE_LOCK, &classAccess) == -1) {
+//	delay(10);
+//      }{
+//	for(j = i; (classes[j] != NULL || classes[j + 1] != NULL) && (i%100) != 0 && j < (((i/100)*100) + 100); j++) {
+//	  classes[j] = classes[j + 1];
+//	}
+//	classes[j] = NULL;
+//      } releaseLock(EXCLUSIVE_LOCK, &classAccess);
+//      break;
+//    }
+//  }
+//}
+//
+///* To be called on JVM unload.*/
+//void freeAllClasses() {
+//  int j = 0;
+//  int i = 0;
+//  for(i = 0; i < maxClassIdx; i ++) {
+//    for(j = 0; classes[i] != NULL && j < classes[i]->num_methods; j++) {
+//      free(classes[i]->methods[j].methodName);
+//      free(classes[i]->methods[j].methodSignature);
+//    }
+//    free(classes[i]->methods);
+//    free(classes[i]->className);
+//    free(classes[i]);
+//  }
+//  free(classes);
+//}
+//#endif

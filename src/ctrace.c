@@ -19,7 +19,8 @@
 
 #define _CRT_SECURE_NO_DEPRECATE
 
-#if defined JVMTI_TYPE
+// #if defined JVMTI_TYPE
+
 
 #include "ctjti.h"
 JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *options, void *reserved) {
@@ -65,4 +66,4 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *options, void *reserved) {
   return JNI_OK;
 }
 
-#endif
+// #endif

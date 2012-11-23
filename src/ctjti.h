@@ -17,7 +17,6 @@
  * along with Java Call Tracer.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#if defined JVMTI_TYPE
 #include <jni.h>
 #include <jvmti.h>
 #include <time.h>
@@ -181,5 +180,3 @@ JNIEXPORT jstring JNICALL Java_com_calltracer_jni_CallTracerJNI_printTrace (JNIE
 JNIEXPORT void JNICALL Java_com_calltracer_jni_CallTracerJNI_flush (JNIEnv *jni_env, jobject obj) {
 	releaseFullTrace(jni_env);
 }
-
-#endif
