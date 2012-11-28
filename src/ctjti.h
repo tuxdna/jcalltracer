@@ -20,7 +20,6 @@
 #include <jni.h>
 #include <jvmti.h>
 #include <time.h>
-#include "ctjni.h"
 
 typedef jmethodID methodIdType;
 typedef jclass classIdType;
