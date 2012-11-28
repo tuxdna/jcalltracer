@@ -485,7 +485,12 @@ callTraceDef *newMethodCall(methodIdType methodId, threadIdType threadId, JNIEnv
       threadIdx = assignThreadIdx(threadId, jni_env);
     }
 
-    callTrace = setCall(getMethodName(methodId), getMethodSignature(methodId), getClassName(classId), currentCall[threadIdx], newCallTrace(), threadIdx);
+    callTrace = setCall(getMethodName(methodId),
+			getMethodSignature(methodId),
+			getClassName(classId),
+			currentCall[threadIdx],
+			newCallTrace(),
+			threadIdx);
     releaseLock(SHARED_LOCK, &callTraceAccess);
     return callTrace;
   }
