@@ -1,80 +1,6 @@
-/*
- * Copyright 2009 Syed Ali Jafar Naqvi
- *
- * This file is part of Java Call Tracer.
- *
- * Java Call Tracer is free software: you can redistribute it and/or modify
- * it under the terms of the Lesser GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * Java Call Tracer is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * Lesser GNU General Public License for more details.
- *
- * You should have received a copy of the Lesser GNU General Public License
- * along with Java Call Tracer.  If not, see <http://www.gnu.org/licenses/>.
- */
+#include "jcalltracer.h"
 
-#include <malloc.h>
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-
-#if !defined OPTION_SEP
-#define OPTION_SEP "="
-#endif
-
-#if !defined MAX_THREADS
-#define MAX_THREADS 1000
-#endif
-
-typedef struct callTraceDef {
-  char *methodName;
-  char *methodSignature;
-  char *className;
-  struct callTraceDef *calledFrom;
-  struct callTraceDef **called;
-  int offset;
-  int callIdx;
-} callTraceDef;
-
-typedef int LOCK_TYPE;
-typedef int LOCK_OBJECT;
-
-LOCK_TYPE SHARED_LOCK = 1;
-LOCK_TYPE EXCLUSIVE_LOCK = 2;
-
-LOCK_OBJECT classAccess = 0;
-LOCK_OBJECT callTraceAccess = 0;
-LOCK_OBJECT assignThreadAccess = 0;
-
-threadIdType threads[MAX_THREADS];
-struct callTraceDef **callStart [MAX_THREADS];
-struct callTraceDef *currentCall [MAX_THREADS];
-int callStartIdx [MAX_THREADS];
-
-int callThershold = -1;
-
-int nextThreadIdx = 0;
-int maxThreadIdx = 0;
-int maxClassIdx = 0;
-
-char **incFilters;
-char **excFilters;
-int incFilterLen = 0;
-int excFilterLen = 0;
-const char *traceFile = "call.trace";
-const char *output_type = "xml";
-const char *usage = "uncontrolled";
-
-typedef struct mapDef {
-  char* name;
-  char* value;
-}mapDef;
-
-mapDef optionsMap[100];
+static jvmtiEnv *g_jvmti_env;
 
 char* translateFilter(char* filter) {
   char * c;
@@ -139,9 +65,12 @@ void setup(char* options) {
 
   excFilters = NULL;
   incFilters = NULL;
+
 #if !defined JVMTI_TYPE
   classes = NULL;
 #endif
+
+  /* Parse options passed to the agent */
   if(options != NULL && strcmp(options, "") != 0) {
     ptrOptions = strtok(options, ",");
     for(i = 0; i < 100 && ptrOptions != NULL; i ++) {
@@ -507,17 +436,25 @@ callTraceDef *endCall(methodIdType methodId, threadIdType threadId, JNIEnv* jni_
     }
     
     threadIdx = getThreadIdx(threadId, jni_env);
-    if(threadIdx == -1 || callStartIdx[threadIdx] <= 0 || (callStartIdx[threadIdx] >= callThershold && callThershold > -1)) {
+
+    if(threadIdx == -1 
+       || callStartIdx[threadIdx] <= 0 
+       || (callStartIdx[threadIdx] >= callThershold 
+	   && callThershold > -1)
+       ) {
       releaseLock(SHARED_LOCK, &callTraceAccess);
       return NULL;
     }
     
-    if(currentCall[threadIdx] != NULL && currentCall[threadIdx]->offset == 0) {
+    if (currentCall[threadIdx] != NULL
+	&& currentCall[threadIdx]->offset == 0) {
       currentCall[threadIdx] = currentCall[threadIdx]->calledFrom;
-    } else if(currentCall[threadIdx] != NULL && currentCall[threadIdx]->offset > 0) {
+    }
+    else if (currentCall[threadIdx] != NULL
+	     && currentCall[threadIdx]->offset > 0) {
       currentCall[threadIdx]->offset --;
     }
-    
+
     releaseLock(SHARED_LOCK, &callTraceAccess);
     return currentCall[threadIdx];
 
@@ -637,4 +574,155 @@ void printFullTrace(JNIEnv* jni_env) {
   }
 
   releaseLock(EXCLUSIVE_LOCK, &callTraceAccess);
+}
+
+monitorType createMonitor(const char *name) {
+  g_jvmti_env->CreateRawMonitor(name, &monitor_lock);
+  return monitor_lock;
+}
+
+void getMonitor(monitorType monitor) {
+  g_jvmti_env->RawMonitorEnter(monitor);
+}
+
+void releaseMonitor(monitorType monitor) {
+  g_jvmti_env->RawMonitorExit(monitor);
+}
+
+void destroyMonitor(monitorType monitor) {
+  g_jvmti_env->DestroyRawMonitor(monitor);
+}
+
+void delay(int i) {
+  i *= 100;
+  for(; i > 0; i --) {
+    __asm ("pause");
+  }
+}
+
+classIdType getMethodClass(methodIdType methodId) {
+  jclass declaring_class_ptr;
+  g_jvmti_env->GetMethodDeclaringClass(methodId, &declaring_class_ptr);
+  if(passFilter(getClassName(declaring_class_ptr)) == 0) {
+    declaring_class_ptr = NULL;
+  }
+  return declaring_class_ptr;
+}
+
+bool isSameThread(JNIEnv* jni_env, threadIdType threadId1, threadIdType threadId2) {
+  return jni_env->IsSameObject(threadId1, threadId2);
+}
+
+bool isSameClass(JNIEnv* jni_env, classIdType classId1, classIdType classId2) {
+  return jni_env->IsSameObject(classId1, classId2);
+}
+
+threadIdType getThreadRef(JNIEnv* jni_env, threadIdType threadId) {
+  return (threadIdType) jni_env->NewWeakGlobalRef(threadId);
+}
+
+classIdType getClassRef(JNIEnv* jni_env, classIdType classId) {
+  return (classIdType) jni_env->NewWeakGlobalRef(classId);
+}
+
+char * getClassName(jclass klass) {
+  char *className[100];
+  char *gclassName[100];
+  char *tmp;
+  g_jvmti_env->GetClassSignature(klass, className, gclassName);
+  tmp = strdup(*className);
+  g_jvmti_env->Deallocate((unsigned char*)*className);
+  g_jvmti_env->Deallocate((unsigned char*)*gclassName);
+  return tmp;
+}
+
+char * getMethodName(methodIdType methodId) {
+  char *methodName[100];
+  char *methodSignature[500];
+  char *gmethodSignature[500];
+  char *tmp;
+  g_jvmti_env->GetMethodName(methodId, methodName, methodSignature, gmethodSignature);
+  tmp = strdup(*methodName);
+  g_jvmti_env->Deallocate((unsigned char*)*methodName);
+  g_jvmti_env->Deallocate((unsigned char*)*methodSignature);
+  g_jvmti_env->Deallocate((unsigned char*)*gmethodSignature);
+  return tmp;
+}
+
+char * getMethodSignature(methodIdType methodId) {
+  char *methodName[100];
+  char *methodSignature[500];
+  char *gmethodSignature[500];
+  char *tmp;
+  g_jvmti_env->GetMethodName(methodId, methodName, methodSignature, gmethodSignature);
+  tmp = strdup(*methodSignature);
+  g_jvmti_env->Deallocate((unsigned char*)*methodName);
+  g_jvmti_env->Deallocate((unsigned char*)*methodSignature);
+  g_jvmti_env->Deallocate((unsigned char*)*gmethodSignature);
+  return tmp;
+}
+
+void JNICALL vmDeath(jvmtiEnv* jvmti_env, JNIEnv* jni_env) {
+  printFullTrace(jni_env);
+  releaseFullTrace(jni_env);
+  destroyMonitor(monitor_lock);
+  clearAllFilters();
+}
+
+void JNICALL threadStart(jvmtiEnv *jvmti_env, JNIEnv* jni_env, jthread thread) {
+}
+
+void JNICALL threadEnd(jvmtiEnv* jvmti_env, JNIEnv* jni_env, jthread thread) {
+}
+
+void JNICALL methodEntry(jvmtiEnv* jvmti_env, JNIEnv* jni_env, jthread thread, jmethodID method) {
+  newMethodCall(method, thread, jni_env);
+}
+
+void JNICALL methodExit(jvmtiEnv* jvmti_env, JNIEnv* jni_env, jthread thread, jmethodID method, jboolean was_popped_by_exception, jvalue return_value) {
+  endCall(method, thread, jni_env);
+}
+
+/* This is the startup method for JVMTI agent */
+JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *options, void *reserved) {
+  jint rc;
+  jvmtiCapabilities capabilities;
+  jvmtiEventCallbacks callbacks;
+  jvmtiEnv *jvmti;
+
+  rc = vm->GetEnv((void **)&jvmti, JVMTI_VERSION);
+  if (rc != JNI_OK) {
+    fprintf(stderr, "ERROR: Unable to create jvmtiEnv, GetEnv failed, error=%d\n", rc);
+    return -1;
+  }
+
+  jvmti->GetCapabilities(&capabilities);
+  capabilities.can_generate_method_entry_events = 1;
+  capabilities.can_generate_method_exit_events = 1;
+
+  jvmti->AddCapabilities(&capabilities);
+
+  memset(&callbacks, 0, sizeof(callbacks));
+  callbacks.VMDeath = &vmDeath;
+  callbacks.ThreadStart = &threadStart;
+  callbacks.ThreadEnd = &threadEnd;
+  callbacks.MethodEntry = &methodEntry;
+  callbacks.MethodExit = &methodExit;
+
+  jvmti->SetEventCallbacks(&callbacks, sizeof(callbacks));
+  jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_CLASS_PREPARE, NULL);
+
+  g_jvmti_env = jvmti;
+
+  setup(options);
+  
+  if(strcmp(usage, "uncontrolled") == 0) {
+    jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_VM_DEATH, NULL);
+    jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_THREAD_START, NULL);
+    jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_THREAD_END, NULL);
+    jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_METHOD_ENTRY, NULL);
+    jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_METHOD_EXIT, NULL);
+  }
+
+  return JNI_OK;
 }
