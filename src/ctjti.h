@@ -25,7 +25,9 @@ typedef jmethodID methodIdType;
 typedef jclass classIdType;
 typedef jthread threadIdType;
 typedef jrawMonitorID monitorType;
+
 #define OPTION_SEP "-"
+
 monitorType monitor_lock;
 
 static jvmtiEnv *g_jvmti_env;
@@ -154,28 +156,4 @@ void JNICALL methodEntry(jvmtiEnv* jvmti_env, JNIEnv* jni_env, jthread thread, j
 
 void JNICALL methodExit(jvmtiEnv* jvmti_env, JNIEnv* jni_env, jthread thread, jmethodID method, jboolean was_popped_by_exception, jvalue return_value) {
 	endCall(method, thread, jni_env);
-}
-
-JNIEXPORT void JNICALL Java_com_calltracer_jni_CallTracerJNI_start (JNIEnv *jni_env, jobject obj) {
-	g_jvmti_env->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_VM_DEATH, NULL);
-	g_jvmti_env->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_THREAD_START, NULL);
-	g_jvmti_env->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_THREAD_END, NULL);
-	g_jvmti_env->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_METHOD_ENTRY, NULL);
-	g_jvmti_env->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_METHOD_EXIT, NULL);
-}
-
-JNIEXPORT void JNICALL Java_com_calltracer_jni_CallTracerJNI_stop (JNIEnv *jni_env, jobject obj) {
-	g_jvmti_env->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_THREAD_START, NULL);
-	g_jvmti_env->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_THREAD_END, NULL);
-	g_jvmti_env->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_METHOD_ENTRY, NULL);
-	g_jvmti_env->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_METHOD_EXIT, NULL);
-}
-
-JNIEXPORT jstring JNICALL Java_com_calltracer_jni_CallTracerJNI_printTrace (JNIEnv *jni_env, jobject obj) {
-	printFullTrace(jni_env);
-	return jni_env->NewStringUTF(traceFile);
-}
-
-JNIEXPORT void JNICALL Java_com_calltracer_jni_CallTracerJNI_flush (JNIEnv *jni_env, jobject obj) {
-	releaseFullTrace(jni_env);
 }
