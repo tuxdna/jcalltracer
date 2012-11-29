@@ -56,7 +56,7 @@ void setup(char* options) {
   FILE *filterFile;
   char line[128];
 
-  printf("Loading agent: libcalltracer5\n\n");
+  printf("setting up libcalltracer5 ...");
   for(i = 0; i < MAX_THREADS; i ++) {
     callStart[i] = NULL;
     callStartIdx[i] = 0;
@@ -160,6 +160,8 @@ void setup(char* options) {
     }
   }
   monitor_lock = createMonitor("monitor_lock");
+  printf("DONE\n");
+
 }
 
 void clearFilter(char *filter) {
@@ -723,13 +725,43 @@ void JNICALL vmDeath(jvmtiEnv* jvmti_env, JNIEnv* jni_env) {
 }
 
 void JNICALL threadStart(jvmtiEnv *jvmti_env, JNIEnv* jni_env, jthread thread) {
+  // initialize thread variables
+  // startnodeid = 0
+  // currentnodeid = 
 }
 
 void JNICALL threadEnd(jvmtiEnv* jvmti_env, JNIEnv* jni_env, jthread thread) {
+  // cleanup thread variables
 }
 
 void JNICALL methodEntry(jvmtiEnv* jvmti_env, JNIEnv* jni_env, jthread thread, jmethodID method) {
-  newMethodCall(method, thread, jni_env);
+
+  callTraceDef *c = newMethodCall(method, thread, jni_env);
+
+  if(NULL != c) {
+    int lenMethodName = strlen(c->methodName) + 1;
+    int lenMethodSignature = strlen(c->methodSignature) + 1;
+    int lenClassName = strlen(c->className) + 1;
+    int vsize = lenMethodName + lenMethodSignature + lenClassName;
+
+    char *value = (char*) malloc(vsize);
+    memcpy(value,
+	   c->methodName, lenMethodName);
+    memcpy(value+lenMethodName,
+	   c->methodSignature, lenMethodSignature);
+    memcpy(value+lenMethodName+lenMethodSignature,
+	   c->className, lenClassName);
+
+    keystore_put((void *)method, sizeof(void*),
+		 (void *)value, vsize
+		 );
+  }
+  // create method call object
+  // store a key-value pair for this call
+  // nodeid = currentnodeid
+  // currentnodeid ++
+  // caller_id = 
+  // called_id = 
 }
 
 void JNICALL methodExit(jvmtiEnv* jvmti_env, JNIEnv* jni_env, jthread thread, jmethodID method, jboolean was_popped_by_exception, jvalue return_value) {
@@ -742,6 +774,8 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *options, void *reserved) {
   jvmtiCapabilities capabilities;
   jvmtiEventCallbacks callbacks;
   jvmtiEnv *jvmti;
+
+  printf("Loading agent: libcalltracer5 ...\n");
 
   rc = vm->GetEnv((void **)&jvmti, JVMTI_VERSION);
   if (rc != JNI_OK) {
