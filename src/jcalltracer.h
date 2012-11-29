@@ -52,9 +52,11 @@ typedef struct threadType {
 
 LOCK_TYPE SHARED_LOCK = 1;
 LOCK_TYPE EXCLUSIVE_LOCK = 2;
+
 LOCK_OBJECT classAccess = 0;
 LOCK_OBJECT callTraceAccess = 0;
 LOCK_OBJECT assignThreadAccess = 0;
+
 threadIdType threads[MAX_THREADS];
 struct callTraceDef **callStart [MAX_THREADS];
 struct callTraceDef *currentCall [MAX_THREADS];
