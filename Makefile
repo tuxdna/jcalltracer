@@ -9,8 +9,9 @@ all: calltracer5.so
 
 # Generate a shared library
 calltracer5.so: $(SRC_DIR)/jcalltracer.c
+	g++  $(INCLUDES) -fPIC -c -g -Wall $(SRC_DIR)/keystore.c
 	g++ -fpermissive $(INCLUDES) -fPIC -c -DMAX_THREADS=1000 -DJVMTI_TYPE=1 -g -Wall $(SRC_DIR)/jcalltracer.c
-	g++ -shared -o libcalltracer5.so jcalltracer.o
+	g++ -shared -o libcalltracer5.so jcalltracer.o keystore.o -ldb
 
 tags:
 	rm -f TAGS

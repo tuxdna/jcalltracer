@@ -1,4 +1,5 @@
 #include "jcalltracer.h"
+#include "keystore.h"
 
 static jvmtiEnv *g_jvmti_env;
 
@@ -65,10 +66,6 @@ void setup(char* options) {
 
   excFilters = NULL;
   incFilters = NULL;
-
-#if !defined JVMTI_TYPE
-  classes = NULL;
-#endif
 
   /* Parse options passed to the agent */
   if(options != NULL && strcmp(options, "") != 0) {
@@ -718,6 +715,7 @@ int getMethodNameAndSignature(methodIdType methodId,
 }
 
 void JNICALL vmDeath(jvmtiEnv* jvmti_env, JNIEnv* jni_env) {
+  keystore_destroy();
   printFullTrace(jni_env);
   releaseFullTrace(jni_env);
   destroyMonitor(monitor_lock);
@@ -769,6 +767,7 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *options, void *reserved) {
 
   g_jvmti_env = jvmti;
 
+  keystore_initialize("keystore.db", "links");
   setup(options);
   
   if(strcmp(usage, "uncontrolled") == 0) {
