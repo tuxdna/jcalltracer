@@ -293,6 +293,7 @@ void releaseCallTrace(callTraceDef* headNode) {
   }
   free(headNode->called);
   free(headNode->methodName);
+  free(headNode->methodSignature);
   free(headNode->className);
   free(headNode);
 }
@@ -485,12 +486,23 @@ callTraceDef *newMethodCall(methodIdType methodId, threadIdType threadId, JNIEnv
       threadIdx = assignThreadIdx(threadId, jni_env);
     }
 
-    callTrace = setCall(getMethodName(methodId),
-			getMethodSignature(methodId),
-			getClassName(classId),
+    /* char *methodName = getMethodName(methodId); */
+    /* char *methodSignature = getMethodSignature(methodId); */
+
+    char *className = getClassName(classId);
+    char *methodName = NULL;
+    char *methodSignature = NULL;
+    getMethodNameAndSignature(methodId, 
+			      &methodName,
+			      &methodSignature);
+
+    callTrace = setCall(methodName,
+			methodSignature,
+			className,
 			currentCall[threadIdx],
 			newCallTrace(),
 			threadIdx);
+
     releaseLock(SHARED_LOCK, &callTraceAccess);
     return callTrace;
   }
@@ -631,40 +643,78 @@ classIdType getClassRef(JNIEnv* jni_env, classIdType classId) {
 }
 
 char * getClassName(jclass klass) {
-  char *className[100];
-  char *gclassName[100];
+  char *className;
+  char *gclassName;
   char *tmp;
-  g_jvmti_env->GetClassSignature(klass, className, gclassName);
-  tmp = strdup(*className);
-  g_jvmti_env->Deallocate((unsigned char*)*className);
-  g_jvmti_env->Deallocate((unsigned char*)*gclassName);
+  g_jvmti_env->GetClassSignature(klass,
+				 &className,
+				 &gclassName);
+  tmp = strdup(className);
+
+  g_jvmti_env->Deallocate( (unsigned char*) className);
+  g_jvmti_env->Deallocate( (unsigned char*) gclassName);
+
   return tmp;
 }
 
 char * getMethodName(methodIdType methodId) {
-  char *methodName[100];
-  char *methodSignature[500];
-  char *gmethodSignature[500];
-  char *tmp;
-  g_jvmti_env->GetMethodName(methodId, methodName, methodSignature, gmethodSignature);
-  tmp = strdup(*methodName);
-  g_jvmti_env->Deallocate((unsigned char*)*methodName);
-  g_jvmti_env->Deallocate((unsigned char*)*methodSignature);
-  g_jvmti_env->Deallocate((unsigned char*)*gmethodSignature);
+  char *methodName = NULL;
+  char *methodSignature = NULL;
+  char *gmethodSignature = NULL;
+  char *tmp = NULL;
+  g_jvmti_env->GetMethodName(methodId, 
+			     &methodName,
+			     &methodSignature,
+			     &gmethodSignature);
+  tmp = strdup(methodName);
+
+  g_jvmti_env->Deallocate((unsigned char*) methodName);
+  g_jvmti_env->Deallocate((unsigned char*) methodSignature);
+  g_jvmti_env->Deallocate((unsigned char*) gmethodSignature);
+
   return tmp;
 }
 
 char * getMethodSignature(methodIdType methodId) {
-  char *methodName[100];
-  char *methodSignature[500];
-  char *gmethodSignature[500];
+  char *methodName;
+  char *methodSignature;
+  char *gmethodSignature;
   char *tmp;
-  g_jvmti_env->GetMethodName(methodId, methodName, methodSignature, gmethodSignature);
-  tmp = strdup(*methodSignature);
-  g_jvmti_env->Deallocate((unsigned char*)*methodName);
-  g_jvmti_env->Deallocate((unsigned char*)*methodSignature);
-  g_jvmti_env->Deallocate((unsigned char*)*gmethodSignature);
+  g_jvmti_env->GetMethodName(methodId,
+			     &methodName,
+			     &methodSignature,
+			     &gmethodSignature);
+  tmp = strdup(methodSignature);
+
+  g_jvmti_env->Deallocate( (unsigned char*) methodName);
+  g_jvmti_env->Deallocate( (unsigned char*) methodSignature);
+  g_jvmti_env->Deallocate( (unsigned char*) gmethodSignature);
+
   return tmp;
+}
+
+int getMethodNameAndSignature(methodIdType methodId,
+				 char **name, 
+				 char **signature) {
+  char *methodName;
+  char *methodSignature;
+  char *gmethodSignature;
+  g_jvmti_env->GetMethodName(methodId,
+			     &methodName,
+			     &methodSignature,
+			     &gmethodSignature);
+  if( NULL != name) {
+    *name = strdup(methodName);
+  }
+  if( NULL != signature) {
+    *signature = strdup(methodSignature);
+  }
+
+  g_jvmti_env->Deallocate( (unsigned char*) methodName);
+  g_jvmti_env->Deallocate( (unsigned char*) methodSignature);
+  g_jvmti_env->Deallocate( (unsigned char*) gmethodSignature);
+
+  return 0;
 }
 
 void JNICALL vmDeath(jvmtiEnv* jvmti_env, JNIEnv* jni_env) {

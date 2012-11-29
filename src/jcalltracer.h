@@ -128,6 +128,8 @@ classIdType getClassRef(JNIEnv* jni_env, classIdType classId);
 char * getClassName(jclass klass);
 char * getMethodName(methodIdType methodId);
 char * getMethodSignature(methodIdType methodId);
+int getMethodNameAndSignature(methodIdType id,
+			      char** name, char** signature);
 void JNICALL vmDeath(jvmtiEnv* jvmti_env, JNIEnv* jni_env) ;
 void JNICALL threadStart(jvmtiEnv *jvmti_env, JNIEnv* jni_env, jthread thread) ;
 void JNICALL threadEnd(jvmtiEnv* jvmti_env, JNIEnv* jni_env, jthread thread) ;
