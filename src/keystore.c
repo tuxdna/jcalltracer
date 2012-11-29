@@ -6,19 +6,22 @@ static int ret;
 static DBT bdb_key, bdb_data;
 
 void keystore_initialize(const char *dbfile, const char *dbname) {
+  printf("Initializing keystore %s:%s ...", dbfile, dbname);
   if(!initialized) {
     
     if ((ret = db_create(&dbp, NULL, 0)) != 0) {
       fprintf(stderr, "db_create: %s\n", db_strerror(ret));
       exit (1);
     }
-    if ((ret = dbp->open(dbp, NULL, dbfile, dbname, DB_BTREE, DB_CREATE, 0664)) != 0) {
+    if ((ret = dbp->open(dbp, NULL, dbfile, dbname,
+			 DB_BTREE, DB_CREATE, 0664)) != 0) {
       dbp->err(dbp, ret, "%s:%s", dbfile, dbname);
       fprintf(stderr, "db_initialize failed: %s\n", db_strerror(ret));
       exit (1);
     }
 
     initialized = 1;
+    printf("DONE\n");
   }
 }
 
