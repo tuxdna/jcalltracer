@@ -23,6 +23,8 @@ typedef jrawMonitorID monitorType;
 typedef int LOCK_TYPE;
 typedef int LOCK_OBJECT;
 
+typedef unsigned int keyValueType;
+
 typedef struct callTraceDef {
   char *methodName;
   char *methodSignature;
@@ -49,6 +51,13 @@ typedef struct methodType {
 typedef struct threadType {
 	int threadId;
 } threadType;
+
+typedef struct threadEntries {
+  int currentIndex;
+  keyValueType threads[MAX_THREADS];
+} threadEntriesType;
+
+threadEntriesType threadKeyIds = {0};
 
 LOCK_TYPE SHARED_LOCK = 1;
 LOCK_TYPE EXCLUSIVE_LOCK = 2;
@@ -82,7 +91,6 @@ char* translateFilter(char* filter) ;
 char* translateFilter1(char* filter) ;
 char* translateFilter2(char* filter) ;
 
-/*To be called on JVM load.*/
 void setup(char* options) ;
 void clearFilter(char *filter) ;
 void clearAllFilters() ;
@@ -90,32 +98,25 @@ int getLock(LOCK_TYPE lock, LOCK_OBJECT *lockObj) ;
 int releaseLock(LOCK_TYPE lock, LOCK_OBJECT *lockObj) ;
 callTraceDef *newCallTrace();
 threadIdType getThreadId(int threadIdx) ;
-
-/*Method to get the index of the current thread.*/
 int getThreadIdx(threadIdType threadId, JNIEnv* jni_env);
-
-/*To be called before calling setCall/endCall, and only if it returns 1 we should call setCall/endCall.*/
 int passFilter(const char * input);
 void releaseCallTrace(callTraceDef* headNode);
 void releaseFullThreadTrace(threadIdType threadId, JNIEnv* jni_env);
-
-/* To be called from a JNI method or on JVM shut down.*/
 void releaseFullTrace(JNIEnv* jni_env);
-void printFullThreadTrace(threadIdType threadId, FILE *out, JNIEnv* jni_env);
+void printFullThreadTrace(threadIdType threadId, FILE *out,
+			  JNIEnv* jni_env);
 int assignThreadIdx(threadIdType threadId, JNIEnv* jni_env);
-callTraceDef *setCall(char* methodName, char* methodSignature, char* className, callTraceDef* calledFrom, callTraceDef* call, int threadIdx);
-
-/*To be called when any method of a thread returns.*/
-callTraceDef *endCall(methodIdType methodId, threadIdType threadId, JNIEnv* jni_env);
-
-/*To be called when a new method is invoked in a flow of a thread.*/
-callTraceDef *newMethodCall(methodIdType methodId, threadIdType threadId, JNIEnv* jni_env);
+callTraceDef *setCall(char* methodName, char* methodSignature,
+		      char* className, callTraceDef* calledFrom,
+		      callTraceDef* call, int threadIdx);
+callTraceDef *endCall(methodIdType methodId, threadIdType threadId,
+		      JNIEnv* jni_env);
+callTraceDef *newMethodCall(methodIdType methodId, threadIdType threadId,
+			    JNIEnv* jni_env);
 void printCallTrace(callTraceDef* headNode, int depth, FILE *out);
-void printFullThreadTrace(threadIdType threadId, FILE *out, JNIEnv* jni_env);
-
-/*This method will print the trace into the traceFile. To be called from a JNI method.*/
+void printFullThreadTrace(threadIdType threadId, FILE *out,
+			  JNIEnv* jni_env);
 void printFullTrace(JNIEnv* jni_env);
-
 monitorType createMonitor(const char *name);
 void getMonitor(monitorType monitor);
 void releaseMonitor(monitorType monitor);
@@ -123,8 +124,10 @@ void destroyMonitor(monitorType monitor);
 void delay(int i);
 int passFilter(const char * input);
 classIdType getMethodClass(methodIdType methodId);
-bool isSameThread(JNIEnv* jni_env, threadIdType threadId1, threadIdType threadId2);
-bool isSameClass(JNIEnv* jni_env, classIdType classId1, classIdType classId2);
+bool isSameThread(JNIEnv* jni_env, threadIdType threadId1,
+		  threadIdType threadId2);
+bool isSameClass(JNIEnv* jni_env, classIdType classId1,
+		 classIdType classId2);
 threadIdType getThreadRef(JNIEnv* jni_env, threadIdType threadId);
 classIdType getClassRef(JNIEnv* jni_env, classIdType classId);
 char * getClassName(jclass klass);
@@ -133,9 +136,16 @@ char * getMethodSignature(methodIdType methodId);
 int getMethodNameAndSignature(methodIdType id,
 			      char** name, char** signature);
 void JNICALL vmDeath(jvmtiEnv* jvmti_env, JNIEnv* jni_env) ;
-void JNICALL threadStart(jvmtiEnv *jvmti_env, JNIEnv* jni_env, jthread thread) ;
-void JNICALL threadEnd(jvmtiEnv* jvmti_env, JNIEnv* jni_env, jthread thread) ;
-void JNICALL methodEntry(jvmtiEnv* jvmti_env, JNIEnv* jni_env, jthread thread, jmethodID method) ;
-void JNICALL methodExit(jvmtiEnv* jvmti_env, JNIEnv* jni_env, jthread thread, jmethodID method, jboolean was_popped_by_exception, jvalue return_value) ;
+void JNICALL threadStart(jvmtiEnv *jvmti_env, JNIEnv* jni_env,
+			 jthread thread) ;
+void JNICALL threadEnd(jvmtiEnv* jvmti_env, JNIEnv* jni_env,
+		       jthread thread) ;
+void JNICALL methodEntry(jvmtiEnv* jvmti_env, JNIEnv* jni_env,
+			 jthread thread, jmethodID method) ;
+void JNICALL methodExit(jvmtiEnv* jvmti_env, JNIEnv* jni_env,
+			jthread thread, jmethodID method,
+			jboolean was_popped_by_exception,
+			jvalue return_value) ;
+keyValueType nextKey();
 
 #endif

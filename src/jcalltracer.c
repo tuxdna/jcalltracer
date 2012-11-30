@@ -3,6 +3,12 @@
 
 static jvmtiEnv *g_jvmti_env;
 
+static keyValueType currentKey = 0;
+
+keyValueType nextKey() {
+  return ++currentKey;
+}
+
 char* translateFilter(char* filter) {
   char * c;
   int i;
@@ -66,6 +72,8 @@ void setup(char* options) {
 
   excFilters = NULL;
   incFilters = NULL;
+
+  threadKeyIds.currentIndex = -1; // empty
 
   /* Parse options passed to the agent */
   if(options != NULL && strcmp(options, "") != 0) {
