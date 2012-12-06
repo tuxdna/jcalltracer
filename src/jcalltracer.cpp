@@ -802,9 +802,22 @@ void JNICALL threadEnd(jvmtiEnv* jvmti_env, JNIEnv* jni_env, jthread thread) {
 
 void JNICALL methodEntry(jvmtiEnv* jvmti_env, JNIEnv* jni_env, jthread thread, jmethodID method) {
 
+  // class = method_class
+  // return if NOT class passes filter
+  // fetch method_name, method_signature, class_name
+  // keyV = next()
+  // thread_key = thread_handle_id_map[thread]
+  // stack = thread_handle_stack_map[thread]
+  // key = if stack.empty() then thread_key else stack.top().keyV
+  // metadata = { method_name, method_signature, class_name }
+  // value = { keyV, metadata }
+  // keystore[key] = value
+  // stack.push(keyV)
+
   CTD *c = newMethodCall(method, thread, jni_env);
 
   if(NULL != c) {
+
     int lenMethodName = strlen(c->methodName) + 1;
     int lenMethodSignature = strlen(c->methodSignature) + 1;
     int lenClassName = strlen(c->className) + 1;

@@ -1,11 +1,6 @@
 #ifndef JCALLTRACER_H
 #define JCALLTRACER_H
 
-#include <malloc.h>
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-
 #include <jni.h>
 #include <jvmti.h>
 #include <time.h>
@@ -14,26 +9,26 @@
 #define MAX_THREADS 1000
 #endif
 
-#define OPTION_SEP "-"
+#define OPT_VAL_SEPARATOR "-"
+#define OPT_VAL_SEPARATOR_CHAR '-'
 
-typedef jmethodID methodIdType;
-typedef jclass classIdType;
-typedef jthread threadIdType;
-typedef jrawMonitorID monitorType;
+#define OPTIONS_SEPARATOR ","
+#define OPTIONS_SEPARATOR_CHAR ','
+
 typedef int LOCK_TYPE;
 typedef int LOCK_OBJECT;
 
 typedef unsigned int keyValueType;
 
-typedef struct callTraceDef {
+typedef struct CTD {
   char *methodName;
   char *methodSignature;
   char *className;
-  struct callTraceDef *calledFrom;
-  struct callTraceDef **called;
+  struct CTD *calledFrom;
+  struct CTD **called;
   int offset;
   int callIdx;
-} callTraceDef;
+} CTD;
 
 typedef struct mapDef {
   char* name;
@@ -57,95 +52,59 @@ typedef struct threadEntries {
   keyValueType threads[MAX_THREADS];
 } threadEntriesType;
 
-threadEntriesType threadKeyIds = {0};
+void setup(char* options) ;
 
-LOCK_TYPE SHARED_LOCK = 1;
-LOCK_TYPE EXCLUSIVE_LOCK = 2;
-
-LOCK_OBJECT classAccess = 0;
-LOCK_OBJECT callTraceAccess = 0;
-LOCK_OBJECT assignThreadAccess = 0;
-
-threadIdType threads[MAX_THREADS];
-struct callTraceDef **callStart [MAX_THREADS];
-struct callTraceDef *currentCall [MAX_THREADS];
-int callStartIdx [MAX_THREADS];
-int callThershold = -1;
-int nextThreadIdx = 0;
-int maxThreadIdx = 0;
-int maxClassIdx = 0;
-
-char **incFilters;
-char **excFilters;
-int incFilterLen = 0;
-int excFilterLen = 0;
-
-const char *traceFile = "call.trace";
-const char *output_type = "xml";
-const char *usage = "uncontrolled";
-
-monitorType monitor_lock;
-mapDef optionsMap[100];
-
+// process options
 char* translateFilter(char* filter) ;
 char* translateFilter1(char* filter) ;
 char* translateFilter2(char* filter) ;
-
-void setup(char* options) ;
+int passFilter(const char * input);
 void clearFilter(char *filter) ;
 void clearAllFilters() ;
+
 int getLock(LOCK_TYPE lock, LOCK_OBJECT *lockObj) ;
 int releaseLock(LOCK_TYPE lock, LOCK_OBJECT *lockObj) ;
-callTraceDef *newCallTrace();
-threadIdType getThreadId(int threadIdx) ;
-int getThreadIdx(threadIdType threadId, JNIEnv* jni_env);
-int passFilter(const char * input);
-void releaseCallTrace(callTraceDef* headNode);
-void releaseFullThreadTrace(threadIdType threadId, JNIEnv* jni_env);
+jrawMonitorID createMonitor(const char *name);
+void getMonitor(jrawMonitorID monitor);
+void releaseMonitor(jrawMonitorID monitor);
+void destroyMonitor(jrawMonitorID monitor);
+
+jthread getThreadId(int threadIdx) ;
+int getThreadIdx(jthread threadId, JNIEnv* jni_env);
+void printFullThreadTrace(jthread threadId, FILE *out, JNIEnv* jni_env);
+int assignThreadIdx(jthread threadId, JNIEnv* jni_env);
+
+CTD *newCallTrace();
+void releaseCallTrace(CTD* headNode);
+void releaseFullThreadTrace(jthread threadId, JNIEnv* jni_env);
 void releaseFullTrace(JNIEnv* jni_env);
-void printFullThreadTrace(threadIdType threadId, FILE *out,
-			  JNIEnv* jni_env);
-int assignThreadIdx(threadIdType threadId, JNIEnv* jni_env);
-callTraceDef *setCall(char* methodName, char* methodSignature,
-		      char* className, callTraceDef* calledFrom,
-		      callTraceDef* call, int threadIdx);
-callTraceDef *endCall(methodIdType methodId, threadIdType threadId,
-		      JNIEnv* jni_env);
-callTraceDef *newMethodCall(methodIdType methodId, threadIdType threadId,
-			    JNIEnv* jni_env);
-void printCallTrace(callTraceDef* headNode, int depth, FILE *out);
-void printFullThreadTrace(threadIdType threadId, FILE *out,
-			  JNIEnv* jni_env);
+CTD *setCall(char* methodName, char* methodSignature, char* className,
+	     CTD* calledFrom, CTD* call, int threadIdx);
+CTD *endCall(jmethodID methodId, jthread threadId, JNIEnv* jni_env);
+CTD *newMethodCall(jmethodID methodId, jthread threadId, JNIEnv* jni_env);
+void printCallTrace(CTD* headNode, int depth, FILE *out);
+void printFullThreadTrace(jthread threadId, FILE *out, JNIEnv* jni_env);
 void printFullTrace(JNIEnv* jni_env);
-monitorType createMonitor(const char *name);
-void getMonitor(monitorType monitor);
-void releaseMonitor(monitorType monitor);
-void destroyMonitor(monitorType monitor);
+
 void delay(int i);
-int passFilter(const char * input);
-classIdType getMethodClass(methodIdType methodId);
-bool isSameThread(JNIEnv* jni_env, threadIdType threadId1,
-		  threadIdType threadId2);
-bool isSameClass(JNIEnv* jni_env, classIdType classId1,
-		 classIdType classId2);
-threadIdType getThreadRef(JNIEnv* jni_env, threadIdType threadId);
-classIdType getClassRef(JNIEnv* jni_env, classIdType classId);
-char * getClassName(jclass klass);
-char * getMethodName(methodIdType methodId);
-char * getMethodSignature(methodIdType methodId);
-int getMethodNameAndSignature(methodIdType id,
-			      char** name, char** signature);
-void JNICALL vmDeath(jvmtiEnv* jvmti_env, JNIEnv* jni_env) ;
-void JNICALL threadStart(jvmtiEnv *jvmti_env, JNIEnv* jni_env,
-			 jthread thread) ;
-void JNICALL threadEnd(jvmtiEnv* jvmti_env, JNIEnv* jni_env,
-		       jthread thread) ;
-void JNICALL methodEntry(jvmtiEnv* jvmti_env, JNIEnv* jni_env,
-			 jthread thread, jmethodID method) ;
-void JNICALL methodExit(jvmtiEnv* jvmti_env, JNIEnv* jni_env,
-			jthread thread, jmethodID method,
-			jboolean was_popped_by_exception,
-			jvalue return_value) ;
+jclass getMethodClass(jmethodID methodId);
+bool isSameThread(JNIEnv* jni_env, jthread threadId1, jthread threadId2);
+bool isSameClass(JNIEnv* jni_env, jclass classId1, jclass classId2);
+jthread getThreadRef(JNIEnv* jni_env, jthread threadId);
+jclass getClassRef(JNIEnv* jni_env, jclass classId);
+char* getClassName(jclass klass);
+char* getMethodName(jmethodID methodId);
+char* getMethodSignature(jmethodID methodId);
+int getMethodNameAndSignature(jmethodID id, char** name, char** signature);
+
+void JNICALL vmDeath(jvmtiEnv* jvmti_env, JNIEnv* jni_env);
+void JNICALL threadStart(jvmtiEnv *jvmti_env, JNIEnv* jni_env, jthread thread);
+void JNICALL threadEnd(jvmtiEnv* jvmti_env, JNIEnv* jni_env, jthread thread);
+void JNICALL methodEntry(jvmtiEnv* jvmti_env, JNIEnv* jni_env, jthread thread, jmethodID method);
+void JNICALL methodExit(jvmtiEnv* jvmti_env, JNIEnv* jni_env, jthread thread,
+			jmethodID method, jboolean exception, jvalue retval);
+
 keyValueType nextKey();
+void setupDataStructures();
 
 #endif
