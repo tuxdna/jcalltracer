@@ -1,9 +1,45 @@
 #include "jcalltracer.h"
 #include "keystore.h"
 
+#include <malloc.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <map>
+
 static jvmtiEnv *g_jvmti_env;
 
 static keyValueType currentKey = 0;
+
+threadEntriesType threadKeyIds = {0};
+LOCK_TYPE SHARED_LOCK = 1;
+LOCK_TYPE EXCLUSIVE_LOCK = 2;
+LOCK_OBJECT classAccess = 0;
+LOCK_OBJECT callTraceAccess = 0;
+LOCK_OBJECT assignThreadAccess = 0;
+jthread threads[MAX_THREADS];
+struct CTD **callStart [MAX_THREADS];
+struct CTD *currentCall [MAX_THREADS];
+int callStartIdx [MAX_THREADS];
+int callThershold = -1;
+int nextThreadIdx = 0;
+int maxThreadIdx = 0;
+int maxClassIdx = 0;
+
+char **incFilters;
+char **excFilters;
+int incFilterLen = 0;
+int excFilterLen = 0;
+
+const char *traceFile = "call.trace";
+const char *output_type = "xml";
+const char *usage = "uncontrolled";
+
+mapDef optionsMap[100];
+
+std::map<char*, char *> options_map;
+
+jrawMonitorID monitor_lock;
 
 keyValueType nextKey() {
   return ++currentKey;
@@ -53,17 +89,83 @@ char* translateFilter2(char* filter) {
   return filter;
 }
 
-/*To be called on JVM load.*/
-void setup(char* options) {
-  int i, j;
-  char *ptrOptions;
+
+void setupFiltersFromString(char *value) {
+  char *ptrfilter = strtok(value, "|");
+  char **tmp;
+  while (ptrfilter != NULL) {
+    if(ptrfilter[0] == '!') {
+      ptrfilter = &ptrfilter[1];
+      tmp = (char **)realloc(excFilters, ((excFilterLen += 3) * sizeof(char *)));
+      if(tmp != NULL) {
+	excFilters = tmp;
+	excFilters[excFilterLen - 3] = translateFilter(strdup(ptrfilter));
+	excFilters[excFilterLen - 2] = translateFilter1(strdup(ptrfilter));
+	excFilters[excFilterLen - 1] = translateFilter2(strdup(ptrfilter));
+      }
+    } else {
+      tmp = (char **)realloc(incFilters, ((incFilterLen += 3) * sizeof(char *)));
+      if(tmp != NULL) {
+	incFilters = tmp;
+	incFilters[incFilterLen - 3] = translateFilter(strdup(ptrfilter));
+	incFilters[incFilterLen - 2] = translateFilter1(strdup(ptrfilter));
+	incFilters[incFilterLen - 1] = translateFilter2(strdup(ptrfilter));
+      }
+    }
+    ptrfilter = strtok(NULL, "|");
+  }
+}
+
+void setupFiltersFromFile(char *fname) {
+  char line[128];
   char *ptrfilter;
   char **tmp;
-  FILE *filterFile;
-  char line[128];
+  FILE * filterFile = fopen(fname, "r");
+  if(filterFile != NULL) {
+    while(fgets(line, 128, filterFile) != NULL) {
+      if(line[strlen(line) - 1] == '\n' || line[strlen(line) - 1] == '\r') {
+	if(line[strlen(line) - 1] == '\r' && line[strlen(line) - 2] == '\n') {
+	  line[strlen(line) - 2] = '\0';
+	} else if(line[strlen(line) - 1] == '\n' 
+		  && line[strlen(line) - 2] == '\r') {
+	  line[strlen(line) - 2] = '\0';
+	} else {
+	  line[strlen(line) - 1] = '\0';
+	}
+      }
+      if(line[0] == '\0') {
+	continue;
+      }
+      if(line[0] == '!') {
+	ptrfilter = &line[1];
+	tmp = (char **)realloc(excFilters, ((excFilterLen += 3) * sizeof(char *)));
+	if(tmp != NULL) {
+	  excFilters = tmp;
+	  excFilters[excFilterLen - 3] = translateFilter(strdup(ptrfilter));
+	  excFilters[excFilterLen - 2] = translateFilter1(strdup(ptrfilter));
+	  excFilters[excFilterLen - 1] = translateFilter2(strdup(ptrfilter));
+	}
+      } else {
+	ptrfilter = &line[0];
+	tmp = (char **)realloc(incFilters, ((incFilterLen += 3) * sizeof(char *)));
+	if(tmp != NULL) {
+	  incFilters = tmp;
+	  incFilters[incFilterLen - 3] = translateFilter(strdup(ptrfilter));
+	  incFilters[incFilterLen - 2] = translateFilter1(strdup(ptrfilter));
+	  incFilters[incFilterLen - 1] = translateFilter2(strdup(ptrfilter));
+	}
+      }
+    }
+    fclose(filterFile);
+  }
+}
+
+
+/*To be called on JVM load.*/
+void setup(char* options) {
 
   printf("setting up libcalltracer5 ...");
-  for(i = 0; i < MAX_THREADS; i ++) {
+  for(int i = 0; i < MAX_THREADS; i ++) {
     callStart[i] = NULL;
     callStartIdx[i] = 0;
     currentCall[i] = NULL;
@@ -73,103 +175,59 @@ void setup(char* options) {
   excFilters = NULL;
   incFilters = NULL;
 
-  threadKeyIds.currentIndex = -1; // empty
-
   /* Parse options passed to the agent */
-  if(options != NULL && strcmp(options, "") != 0) {
-    ptrOptions = strtok(options, ",");
-    for(i = 0; i < 100 && ptrOptions != NULL; i ++) {
-      optionsMap[i].name = ptrOptions;
-      ptrOptions = strtok(NULL, ",");
-    }
-    if(i == 0) {
-      optionsMap[i].name = options;
-      i++;
-    }
+  if(options == NULL || strcmp(options, "") == 0) {
+    // no options specified, exit!
+    exit(-1);
+  }
 
-    for(j = 0; j < i; j ++) {
-      ptrOptions = strtok(optionsMap[j].name, OPTION_SEP);
-      optionsMap[j].value = strtok(NULL, OPTION_SEP);
-      if(optionsMap[j].value == NULL) {
-	continue;
-      }
-      optionsMap[j].name = ptrOptions;
+  char *ptrOptions = strtok(options, OPTIONS_SEPARATOR);
+  for(int i = 0; i < 100 && ptrOptions != NULL; i ++) {
+    optionsMap[i].name = ptrOptions;
+    char *v = strstr(ptrOptions, OPT_VAL_SEPARATOR);
+    if(NULL != v) {
+      *v = '\0';
+      v++;
+      char *k = ptrOptions;
+      options_map[k] = v;
+    }
+    ptrOptions = strtok(NULL, OPTIONS_SEPARATOR);
+  }
 
-      if(strcmp(optionsMap[j].name, "traceFile") == 0) {
-	traceFile = strdup(optionsMap[j].value);
-      } else if(strcmp(optionsMap[j].name, "filterList") == 0) {
-	ptrfilter = strtok(optionsMap[j].value, "|");
-	while (ptrfilter != NULL) {
-	  if(ptrfilter[0] == '!') {
-	    ptrfilter = &ptrfilter[1];
-	    tmp = (char **)realloc(excFilters, ((excFilterLen += 3) * sizeof(char *)));
-	    if(tmp != NULL) {
-	      excFilters = tmp;
-	      excFilters[excFilterLen - 3] = translateFilter(strdup(ptrfilter));
-	      excFilters[excFilterLen - 2] = translateFilter1(strdup(ptrfilter));
-	      excFilters[excFilterLen - 1] = translateFilter2(strdup(ptrfilter));
-	    }
-	  } else {
-	    tmp = (char **)realloc(incFilters, ((incFilterLen += 3) * sizeof(char *)));
-	    if(tmp != NULL) {
-	      incFilters = tmp;
-	      incFilters[incFilterLen - 3] = translateFilter(strdup(ptrfilter));
-	      incFilters[incFilterLen - 2] = translateFilter1(strdup(ptrfilter));
-	      incFilters[incFilterLen - 1] = translateFilter2(strdup(ptrfilter));
-	    }
-	  }
-	  ptrfilter = strtok(NULL, "|");
-	}
-      } else if(strcmp(optionsMap[j].name, "filterFile") == 0) {
-	filterFile = fopen(optionsMap[j].value, "r");
-	if(filterFile != NULL) {
-	  while(fgets(line, 128, filterFile) != NULL) {
-	    if(line[strlen(line) - 1] == '\n' || line[strlen(line) - 1] == '\r') {
-	      if(line[strlen(line) - 1] == '\r' && line[strlen(line) - 2] == '\n') {
-		line[strlen(line) - 2] = '\0';
-	      } else if(line[strlen(line) - 1] == '\n' && line[strlen(line) - 2] == '\r') {
-		line[strlen(line) - 2] = '\0';
-	      } else {
-		line[strlen(line) - 1] = '\0';
-	      }
-	    }
-	    if(line[0] == '\0') {
-	      continue;
-	    }
-	    if(line[0] == '!') {
-	      ptrfilter = &line[1];
-	      tmp = (char **)realloc(excFilters, ((excFilterLen += 3) * sizeof(char *)));
-	      if(tmp != NULL) {
-		excFilters = tmp;
-		excFilters[excFilterLen - 3] = translateFilter(strdup(ptrfilter));
-		excFilters[excFilterLen - 2] = translateFilter1(strdup(ptrfilter));
-		excFilters[excFilterLen - 1] = translateFilter2(strdup(ptrfilter));
-	      }
-	    } else {
-	      ptrfilter = &line[0];
-	      tmp = (char **)realloc(incFilters, ((incFilterLen += 3) * sizeof(char *)));
-	      if(tmp != NULL) {
-		incFilters = tmp;
-		incFilters[incFilterLen - 3] = translateFilter(strdup(ptrfilter));
-		incFilters[incFilterLen - 2] = translateFilter1(strdup(ptrfilter));
-		incFilters[incFilterLen - 1] = translateFilter2(strdup(ptrfilter));
-	      }
-	    }
-	  }
-	  fclose(filterFile);
-	}
-      } else if(strcmp(optionsMap[j].name, "outputType") == 0) {
-	output_type = strdup(optionsMap[j].value);
-      } else if(strcmp(optionsMap[j].name, "usage") == 0) {
-	usage = strdup(optionsMap[j].value);
-      } else if(strcmp(optionsMap[j].name, "callThershold") == 0) {
-	callThershold = atoi(strdup(optionsMap[j].value));
-      }
+  for( std::map<char*,char*>::iterator iter = options_map.begin();
+       iter != options_map.end(); ++iter ) {
+    char *key = (*iter).first;
+    char *value = (*iter).second;
+
+    if ( strcmp(key, "traceFile") == 0 ) {
+      traceFile = strdup(value);
+    }
+    else if ( strcmp(key, "filterList") == 0 ) {
+      setupFiltersFromString(value);
+    }
+    else if ( strcmp(key, "filterFile") == 0 ) {
+      setupFiltersFromFile(value);
+    }
+    else if ( strcmp(key, "outputType") == 0 ) {
+      output_type = strdup(value);
+    }
+    else if ( strcmp(key, "usage") == 0 ) {
+      usage = strdup(value);
+    }
+    else if ( strcmp(key, "callThershold") == 0 ) {
+      callThershold = atoi(value);
     }
   }
+
   monitor_lock = createMonitor("monitor_lock");
   printf("DONE\n");
+}
 
+#include <map>
+#include <stack>
+
+void setupDataStructures() {
+  
 }
 
 void clearFilter(char *filter) {
@@ -237,12 +295,12 @@ int releaseLock(LOCK_TYPE lock, LOCK_OBJECT *lockObj) {
   return 1;
 }
 
-callTraceDef *newCallTrace() {
-  return (callTraceDef*) malloc(sizeof(callTraceDef));
+CTD *newCallTrace() {
+  return (CTD*) malloc(sizeof(CTD));
 }
 
-threadIdType getThreadId(int threadIdx) {
-  threadIdType threadId = NULL;
+jthread getThreadId(int threadIdx) {
+  jthread threadId = NULL;
   if(threadIdx < 0 && threadIdx > 999)
     return NULL;
   while(getLock(SHARED_LOCK, &assignThreadAccess) == -1) {
@@ -254,7 +312,7 @@ threadIdType getThreadId(int threadIdx) {
 }
 
 /*Method to get the index of the current thread.*/
-int getThreadIdx(threadIdType threadId, JNIEnv* jni_env) {
+int getThreadIdx(jthread threadId, JNIEnv* jni_env) {
   int i = 0;
   if(threadId == NULL)
     return -1;
@@ -291,7 +349,7 @@ int passFilter(const char * input) {
   return 0;
 }
 
-void releaseCallTrace(callTraceDef* headNode) {
+void releaseCallTrace(CTD* headNode) {
   int i = 0;
   if(headNode == NULL)
     return;
@@ -305,7 +363,7 @@ void releaseCallTrace(callTraceDef* headNode) {
   free(headNode);
 }
 
-void releaseFullThreadTrace(threadIdType threadId, JNIEnv* jni_env) {
+void releaseFullThreadTrace(jthread threadId, JNIEnv* jni_env) {
   int threadIdx = getThreadIdx(threadId, jni_env);
   int i;
   if(threadIdx == -1)
@@ -322,7 +380,7 @@ void releaseFullThreadTrace(threadIdType threadId, JNIEnv* jni_env) {
 /* To be called from a JNI method or on JVM shut down.*/
 void releaseFullTrace(JNIEnv* jni_env) {
   int i;
-  threadIdType threadId;
+  jthread threadId;
 
   while(getLock(EXCLUSIVE_LOCK, &callTraceAccess) == -1) {
     delay(10);
@@ -341,14 +399,14 @@ void releaseFullTrace(JNIEnv* jni_env) {
   releaseLock(EXCLUSIVE_LOCK, &callTraceAccess);
 }
 
-void printFullThreadTrace(threadIdType threadId, FILE *out, JNIEnv* jni_env);
+void printFullThreadTrace(jthread threadId, FILE *out, JNIEnv* jni_env);
 
-int assignThreadIdx(threadIdType threadId, JNIEnv* jni_env) {
+int assignThreadIdx(jthread threadId, JNIEnv* jni_env) {
   int threadIdx = -1;
   FILE *out;
   char * newFile;
-  threadIdType oldThreadId = NULL;
-  threadIdType threadRef = getThreadRef(jni_env, threadId);
+  jthread oldThreadId = NULL;
+  jthread threadRef = getThreadRef(jni_env, threadId);
   while(getLock(EXCLUSIVE_LOCK, &assignThreadAccess) == -1) {
     delay(10);
   }{
@@ -376,8 +434,8 @@ int assignThreadIdx(threadIdType threadId, JNIEnv* jni_env) {
 }
 
 // #if defined JVMTI_TYPE
-callTraceDef *setCall(char* methodName, char* methodSignature, char* className, callTraceDef* calledFrom, callTraceDef* call, int threadIdx) {
-  callTraceDef ** temp;
+CTD *setCall(char* methodName, char* methodSignature, char* className, CTD* calledFrom, CTD* call, int threadIdx) {
+  CTD ** temp;
   while(getLock(SHARED_LOCK, &callTraceAccess) == -1) {
     delay(10);
   }
@@ -402,13 +460,13 @@ callTraceDef *setCall(char* methodName, char* methodSignature, char* className, 
     call->calledFrom = calledFrom;
     call->called = NULL;
     if(calledFrom == NULL) {
-      temp = (callTraceDef **)realloc(callStart[threadIdx], (++ (callStartIdx[threadIdx])) * sizeof(callTraceDef *));
+      temp = (CTD **)realloc(callStart[threadIdx], (++ (callStartIdx[threadIdx])) * sizeof(CTD *));
       if (temp != NULL) {
 	callStart[threadIdx] = temp;
 	callStart[threadIdx][callStartIdx[threadIdx] - 1] = call;
       }
     } else {
-      temp = (callTraceDef **)realloc(calledFrom->called, (++ (calledFrom->callIdx)) * sizeof(callTraceDef *));
+      temp = (CTD **)realloc(calledFrom->called, (++ (calledFrom->callIdx)) * sizeof(CTD *));
       if (temp != NULL) {
 	calledFrom->called = temp; /* OK, assign new, larger storage to pointer */
 	calledFrom->called[calledFrom->callIdx - 1] = call;
@@ -429,9 +487,9 @@ callTraceDef *setCall(char* methodName, char* methodSignature, char* className, 
 }
 
 /*To be called when any method of a thread returns.*/
-callTraceDef *endCall(methodIdType methodId, threadIdType threadId, JNIEnv* jni_env) {
+CTD *endCall(jmethodID methodId, jthread threadId, JNIEnv* jni_env) {
   int threadIdx = -1;
-  classIdType classId;
+  jclass classId;
   while(getLock(SHARED_LOCK, &callTraceAccess) == -1) {
     delay(10);
   }
@@ -473,10 +531,10 @@ callTraceDef *endCall(methodIdType methodId, threadIdType threadId, JNIEnv* jni_
 }
 
 /*To be called when a new method is invoked in a flow of a thread.*/
-callTraceDef *newMethodCall(methodIdType methodId, threadIdType threadId, JNIEnv* jni_env) {
-  classIdType classId;
+CTD *newMethodCall(jmethodID methodId, jthread threadId, JNIEnv* jni_env) {
+  jclass classId;
   int threadIdx = -1;
-  callTraceDef *callTrace;
+  CTD *callTrace;
   while(getLock(SHARED_LOCK, &callTraceAccess) == -1) {
     delay(10);
   }
@@ -518,7 +576,7 @@ callTraceDef *newMethodCall(methodIdType methodId, threadIdType threadId, JNIEnv
   return NULL;
 }
 
-void printCallTrace(callTraceDef* headNode, int depth, FILE *out) {
+void printCallTrace(CTD* headNode, int depth, FILE *out) {
   int i = 0;
 
   if(headNode == NULL)
@@ -554,7 +612,7 @@ void printCallTrace(callTraceDef* headNode, int depth, FILE *out) {
   }
 }
 
-void printFullThreadTrace(threadIdType threadId, FILE *out, JNIEnv* jni_env) {
+void printFullThreadTrace(jthread threadId, FILE *out, JNIEnv* jni_env) {
   int threadIdx = getThreadIdx(threadId, jni_env);
   int i;
   if(threadIdx == -1)
@@ -575,7 +633,7 @@ void printFullThreadTrace(threadIdType threadId, FILE *out, JNIEnv* jni_env) {
 /*This method will print the trace into the traceFile. To be called from a JNI method.*/
 void printFullTrace(JNIEnv* jni_env) {
   int i;
-  threadIdType threadId;
+  jthread threadId;
   FILE *out;
 
   while(getLock(EXCLUSIVE_LOCK, &callTraceAccess) == -1) {
@@ -600,20 +658,20 @@ void printFullTrace(JNIEnv* jni_env) {
   releaseLock(EXCLUSIVE_LOCK, &callTraceAccess);
 }
 
-monitorType createMonitor(const char *name) {
+jrawMonitorID createMonitor(const char *name) {
   g_jvmti_env->CreateRawMonitor(name, &monitor_lock);
   return monitor_lock;
 }
 
-void getMonitor(monitorType monitor) {
+void getMonitor(jrawMonitorID monitor) {
   g_jvmti_env->RawMonitorEnter(monitor);
 }
 
-void releaseMonitor(monitorType monitor) {
+void releaseMonitor(jrawMonitorID monitor) {
   g_jvmti_env->RawMonitorExit(monitor);
 }
 
-void destroyMonitor(monitorType monitor) {
+void destroyMonitor(jrawMonitorID monitor) {
   g_jvmti_env->DestroyRawMonitor(monitor);
 }
 
@@ -624,7 +682,7 @@ void delay(int i) {
   }
 }
 
-classIdType getMethodClass(methodIdType methodId) {
+jclass getMethodClass(jmethodID methodId) {
   jclass declaring_class_ptr;
   g_jvmti_env->GetMethodDeclaringClass(methodId, &declaring_class_ptr);
   if(passFilter(getClassName(declaring_class_ptr)) == 0) {
@@ -633,20 +691,20 @@ classIdType getMethodClass(methodIdType methodId) {
   return declaring_class_ptr;
 }
 
-bool isSameThread(JNIEnv* jni_env, threadIdType threadId1, threadIdType threadId2) {
+bool isSameThread(JNIEnv* jni_env, jthread threadId1, jthread threadId2) {
   return jni_env->IsSameObject(threadId1, threadId2);
 }
 
-bool isSameClass(JNIEnv* jni_env, classIdType classId1, classIdType classId2) {
+bool isSameClass(JNIEnv* jni_env, jclass classId1, jclass classId2) {
   return jni_env->IsSameObject(classId1, classId2);
 }
 
-threadIdType getThreadRef(JNIEnv* jni_env, threadIdType threadId) {
-  return (threadIdType) jni_env->NewWeakGlobalRef(threadId);
+jthread getThreadRef(JNIEnv* jni_env, jthread threadId) {
+  return (jthread) jni_env->NewWeakGlobalRef(threadId);
 }
 
-classIdType getClassRef(JNIEnv* jni_env, classIdType classId) {
-  return (classIdType) jni_env->NewWeakGlobalRef(classId);
+jclass getClassRef(JNIEnv* jni_env, jclass classId) {
+  return (jclass) jni_env->NewWeakGlobalRef(classId);
 }
 
 char * getClassName(jclass klass) {
@@ -664,7 +722,7 @@ char * getClassName(jclass klass) {
   return tmp;
 }
 
-char * getMethodName(methodIdType methodId) {
+char * getMethodName(jmethodID methodId) {
   char *methodName = NULL;
   char *methodSignature = NULL;
   char *gmethodSignature = NULL;
@@ -682,7 +740,7 @@ char * getMethodName(methodIdType methodId) {
   return tmp;
 }
 
-char * getMethodSignature(methodIdType methodId) {
+char * getMethodSignature(jmethodID methodId) {
   char *methodName;
   char *methodSignature;
   char *gmethodSignature;
@@ -700,7 +758,7 @@ char * getMethodSignature(methodIdType methodId) {
   return tmp;
 }
 
-int getMethodNameAndSignature(methodIdType methodId,
+int getMethodNameAndSignature(jmethodID methodId,
 				 char **name, 
 				 char **signature) {
   char *methodName;
@@ -744,7 +802,7 @@ void JNICALL threadEnd(jvmtiEnv* jvmti_env, JNIEnv* jni_env, jthread thread) {
 
 void JNICALL methodEntry(jvmtiEnv* jvmti_env, JNIEnv* jni_env, jthread thread, jmethodID method) {
 
-  callTraceDef *c = newMethodCall(method, thread, jni_env);
+  CTD *c = newMethodCall(method, thread, jni_env);
 
   if(NULL != c) {
     int lenMethodName = strlen(c->methodName) + 1;
