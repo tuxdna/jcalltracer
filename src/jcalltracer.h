@@ -18,8 +18,6 @@
 typedef int LOCK_TYPE;
 typedef int LOCK_OBJECT;
 
-typedef unsigned int keyValueType;
-
 typedef struct CTD {
   char *methodName;
   char *methodSignature;
@@ -30,29 +28,14 @@ typedef struct CTD {
   int callIdx;
 } CTD;
 
-typedef struct mapDef {
-  char* name;
-  char* value;
-} mapDef;
-
-typedef struct methodType {
-    char *method_name;
-    char *method_signature;
-    int start_lineno;
-    int end_lineno;
-    jmethodID method_id;
-} methodType;
-
-typedef struct threadType {
-	int threadId;
-} threadType;
+typedef unsigned int KeyType;
 
 typedef struct threadEntries {
-  int currentIndex;
-  keyValueType threads[MAX_THREADS];
-} threadEntriesType;
+  int size;
+  KeyType threads[MAX_THREADS];
+} ThreadEntriesType;
 
-void setup(char* options) ;
+void setup(char* options);
 
 // process options
 char* translateFilter(char* filter) ;
@@ -104,7 +87,16 @@ void JNICALL methodEntry(jvmtiEnv* jvmti_env, JNIEnv* jni_env, jthread thread, j
 void JNICALL methodExit(jvmtiEnv* jvmti_env, JNIEnv* jni_env, jthread thread,
 			jmethodID method, jboolean exception, jvalue retval);
 
-keyValueType nextKey();
-void setupDataStructures();
+#ifdef _WIN32
+
+#include <windows.h>
+void sleep(unsigned milliseconds)
+{
+  Sleep(milliseconds);
+}
+
+#else
+#include <unistd.h>
+#endif
 
 #endif
