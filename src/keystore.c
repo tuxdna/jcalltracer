@@ -15,7 +15,7 @@ void keystore_initialize(const char *dbfile, const char *dbname) {
     }
     if ((ret = dbp->open(dbp, NULL, dbfile, dbname,
 			 DB_BTREE, DB_CREATE, 0664)) != 0) {
-      dbp->err(dbp, ret, "%s:%s", dbfile, dbname);
+      dbp->err(dbp, ret, "%s:%s", dbfile, NULL);
       fprintf(stderr, "db_initialize failed: %s\n", db_strerror(ret));
       exit (1);
     }

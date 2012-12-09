@@ -176,13 +176,64 @@ KeyType nextKey() {
   static KeyType ck = -1;
   return ++ck;
 }
+/*
+  {
+    jthread => [threadId, stack<KeyDegreePair>*]
+  }
+ */
 
-typedef std::stack<KeyType> KeyStackType;
+class KeyDegreePair{
+public:
+  KeyType key;
+  int degree;
+  KeyDegreePair(KeyType k, int d) {
+    this->key = k;
+    this->degree = d;
+  }
+  KeyDegreePair(KeyType k) {
+    this->key = k;
+    this->degree = 0;
+  }
+  KeyDegreePair() {
+    this->key = -1;
+    this->degree = 0;
+  }
+};
+
+typedef std::stack<KeyDegreePair *> KeyDegreeStack;
+
+class KeyStackPair {
+public:
+  KeyType key;
+  KeyDegreeStack *stack;
+
+  KeyStackPair(KeyType k) {
+    this->key = k;
+    this->stack = new KeyDegreeStack;
+  }
+
+  KeyStackPair() {
+    this->key = -1;
+    this->stack = NULL;
+  }
+
+  ~KeyStackPair() {
+    if(NULL != this->stack) {
+      // release all memory held by this stack
+      while(!stack->empty()) {
+	KeyDegreePair *p = stack->top();
+	stack->pop();
+	delete p;
+      }
+      delete stack;
+    }
+  }
+
+};
 
 static KeyType rootKey = nextKey();
 static ThreadEntriesType threadKeyIds = {0};
-static std::map<jthread, KeyStackType *> th_stack_map;
-static std::map<jthread, KeyType> th_id_map;
+static std::map<jthread, KeyStackPair *> threads_map;
 
 void updateThreadEntries() {
   keystore_put((void *)&rootKey, sizeof(KeyType),
@@ -199,7 +250,7 @@ void addThreadEntry(KeyType key) {
 void startup(char *options) {
   printf("rootKey: %d \n", rootKey);
   setup(options);
-  keystore_initialize("keystore.db", "links");
+  keystore_initialize("keystore.db", NULL);
   threadKeyIds.size = 0;
   updateThreadEntries();
 }
@@ -370,14 +421,20 @@ void JNICALL vmDeath(jvmtiEnv* jvmti_env, JNIEnv* jni_env) {
   This function must be called within a critical section
   since it modifieds a shared datastructure for thread entries
 */
-KeyType newThreadEntry(jthread thread) {
+KeyStackPair * newThreadEntry(jthread thread) {
   KeyType threadId = nextKey();
+
   addThreadEntry(threadId);
   updateThreadEntries();
-  th_id_map[thread] = threadId;
-  th_stack_map[thread] = new KeyStackType;
-  // printf("Thread entry created: %d %p\n", threadId, thread);
-  return threadId;
+
+  KeyStackPair *pair = new KeyStackPair(threadId);
+  threads_map[thread] = pair;
+
+  KeyDegreeStack *stack = pair->stack;
+  stack->push(new KeyDegreePair(pair->key, 0));
+
+  printf("Thread entry created: %d %p\n", threadId, thread);
+  return pair;
 }
 
 /*
@@ -386,25 +443,28 @@ KeyType newThreadEntry(jthread thread) {
 */
 void threadCleanup(jthread thread) {
   printf("Thread exiting: %p\n", thread);
-  KeyStackType *stack = th_stack_map[thread]; // cleanup thread stack
-  th_stack_map.erase(thread);
-  th_id_map.erase(thread);
-  delete stack;
+  KeyStackPair *pair =  threads_map[thread];
+  delete pair;
+  threads_map.erase(thread);
 }
 
 void printAllThreads() {
   printf("All threads:\n");
-  for(std::map<jthread, KeyType>::iterator iter = th_id_map.begin();
-      iter !=th_id_map.end();
+  for(std::map<jthread, KeyStackPair*>::iterator iter
+	= threads_map.begin();
+      iter !=threads_map.end();
       iter++) {
-    printf(" key: %p , val: %d \n", iter->first, iter->second );
+    jthread thread = iter->first;
+    KeyStackPair *pair = iter->second;
+    printf(" key: %p , val: %d, stack: %p\n",
+	   thread, pair->key, pair->stack);
   }
 }
 
 void JNICALL threadStart(jvmtiEnv *jvmti_env, JNIEnv* jni_env,
 			 jthread thread) {
   //  obtain lock
-  while(getLock(SHARED_LOCK, &assignThreadAccess) == -1) {delay(10);} 
+  while(getLock(SHARED_LOCK, &assignThreadAccess) == -1) {delay(10);}
 
   newThreadEntry(thread);
 
@@ -456,64 +516,51 @@ void JNICALL methodEntry(jvmtiEnv* jvmti_env, JNIEnv* jni_env,
 
   // only process the classes that are allowed
   if( passFilter(cn) == 1 ) {
-    // printf("Thread %p / Method %p\n", thread, method);
-    // printf("    Method: %s / %s / %s\n", mn, ms, gms);
-    // printf("    Class: %s / %s\n", cn, gcn);
-    // printf("    Filter PASSED\n");
-
-    KeyType threadId = -1;
-    KeyStackType *stack = NULL;
+    
+    KeyStackPair *pair = NULL;
     
     // obtain thread access lock
     while(getLock(SHARED_LOCK, &assignThreadAccess) == -1) { delay(10); }
     
-    if( th_id_map.count(thread) == 0 ) {
-      threadId = newThreadEntry(thread);
-      // printf("    Thread CREATED: %p\n", thread);
+    if( threads_map.count(thread) == 0 ) {
+      pair = newThreadEntry(thread);
     } else {
-      threadId = th_id_map[thread];
-      // printf("    Thread FOUND: %p\n", thread);
+      pair = threads_map[thread];
     }
 
-    printf("Method Entry: TID %d: %s / %s\n", threadId, cn, mn);
-    
-    stack = th_stack_map[thread];
-    // obtain thread access lock
-    releaseLock(SHARED_LOCK, &assignThreadAccess);
-    
+    printf("Method Entry: TID %d: %s / %s\n", pair->key, cn, mn);
     KeyType methodId = nextKey();
-    
-    // printf("    Enter Method: %d/%d\n", threadId, methodId);
+    KeyDegreeStack *stack = pair->stack;
+    printf(" Stack size: %ld\n", stack->size());
+    KeyType key = stack->top()->key;
+    int order = ++(stack->top()->degree);
 
-    int len_key = sizeof(KeyType);
+    int len_key = sizeof(methodId);
+    int len_order = sizeof(order);
     int len_mn = strlen(mn) + 1;
     int len_ms = strlen(ms) + 1;
     int len_cn = strlen(cn) + 1;
 
-    int vsize = len_key + len_mn + len_ms + len_cn;
+    int vsize = len_key + len_order + len_mn + len_ms + len_cn;
 
     char *value = (char*) malloc(vsize);
     char *curr = NULL;
     curr = value;
-    memcpy( curr, &methodId, len_key); curr += sizeof(KeyType);
-    memcpy( curr, mn, len_mn); curr += len_mn;
-    memcpy( curr, ms, len_ms); curr += len_ms;
+    memcpy( curr, &methodId, len_key); curr += len_key;
+    memcpy( curr, &order, len_order);  curr += len_order;
+    memcpy( curr, mn, len_mn);         curr += len_mn;
+    memcpy( curr, ms, len_ms);         curr += len_ms;
     memcpy( curr, cn, len_cn);
-
-
-    KeyType key = -1;
-    if(stack->empty()) {
-      key = threadId;
-    } else {
-      key = stack->top();
-    }
 
     keystore_put((void *)&key, sizeof(key),
 		 (void *)value, vsize
 		 );
     free(value);
-    stack->push(methodId);
+    stack->push(new KeyDegreePair(methodId));
 
+    // obtain thread access lock
+    releaseLock(SHARED_LOCK, &assignThreadAccess);
+    
   }
 
   
@@ -529,20 +576,16 @@ void JNICALL methodEntry(jvmtiEnv* jvmti_env, JNIEnv* jni_env,
 
 void JNICALL methodExit(jvmtiEnv* jvmti_env, JNIEnv* jni_env, jthread thread, jmethodID method, jboolean was_popped_by_exception, jvalue return_value) {
 
-    KeyType threadId = -1;
-    KeyStackType *stack = NULL;
-    
     // obtain thread access lock
     while(getLock(SHARED_LOCK, &assignThreadAccess) == -1) { delay(10); }
     
-    if( th_id_map.count(thread) == 0 ) {
+    if( threads_map.count(thread) == 0 ) {
       // ignore
       releaseLock(SHARED_LOCK, &assignThreadAccess);
       return;
     }
 
-    threadId = th_id_map[thread];
-    stack = th_stack_map[thread];
+    KeyStackPair *pair = threads_map[thread];
 
     jclass classId = NULL;
     char *cn = NULL, *gcn = NULL, *mn = NULL, *ms = NULL, *gms = NULL;
@@ -551,17 +594,20 @@ void JNICALL methodExit(jvmtiEnv* jvmti_env, JNIEnv* jni_env, jthread thread, jm
     jvmti_env->GetMethodDeclaringClass(method, &classId);
     jvmti_env->GetClassSignature(classId, &cn, &gcn);
 
+    KeyType threadId = pair->key;
+    
     // only process the classes that are allowed
     if( passFilter(cn) == 1 ) {
       printf("Method Exit: TID %d: %s / %s\n", threadId, cn, mn);
       // printf("  Thread %p / Method %p\n", thread, method);
       // printf("    Class: %s / %s\n", cn, gcn);
       // printf("    Method: %s / %s / %s\n", mn, ms, gms);
+      KeyDegreeStack *stack = pair->stack;
+      if(! stack->empty() ) {
+	stack->pop();
+      }
     }
 
-    if(! stack->empty() ) {
-      stack->pop();
-    }
 
     jvmti_env->Deallocate( (unsigned char*) cn);
     jvmti_env->Deallocate( (unsigned char*) gcn);
