@@ -529,13 +529,13 @@ void JNICALL methodEntry(jvmtiEnv* jvmti_env, JNIEnv* jni_env,
     }
 
     printf("Method Entry: TID %d: %s / %s\n", pair->key, cn, mn);
-    KeyType methodId = nextKey();
+    KeyType node_key = nextKey();
     KeyDegreeStack *stack = pair->stack;
     printf(" Stack size: %ld\n", stack->size());
-    KeyType key = stack->top()->key;
+    KeyType parent_key = stack->top()->key;
     int order = ++(stack->top()->degree);
 
-    int len_key = sizeof(methodId);
+    int len_key = sizeof(parent_key);
     int len_order = sizeof(order);
     int len_mn = strlen(mn) + 1;
     int len_ms = strlen(ms) + 1;
@@ -546,17 +546,16 @@ void JNICALL methodEntry(jvmtiEnv* jvmti_env, JNIEnv* jni_env,
     char *value = (char*) malloc(vsize);
     char *curr = NULL;
     curr = value;
-    memcpy( curr, &methodId, len_key); curr += len_key;
+    memcpy( curr, &parent_key, len_key); curr += len_key;
     memcpy( curr, &order, len_order);  curr += len_order;
     memcpy( curr, mn, len_mn);         curr += len_mn;
     memcpy( curr, ms, len_ms);         curr += len_ms;
     memcpy( curr, cn, len_cn);
 
-    keystore_put((void *)&key, sizeof(key),
-		 (void *)value, vsize
-		 );
+    keystore_put((void *)&node_key, sizeof(node_key),
+		 (void *)value, vsize);
     free(value);
-    stack->push(new KeyDegreePair(methodId));
+    stack->push(new KeyDegreePair(node_key));
 
     // obtain thread access lock
     releaseLock(SHARED_LOCK, &assignThreadAccess);

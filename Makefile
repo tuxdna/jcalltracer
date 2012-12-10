@@ -1,4 +1,4 @@
-JDK_HOME = /usr/lib/jvm/java-openjdk
+JDK_HOME = /usr/lib/jvm/java-6-openjdk
 
 SRC_DIR = src
 
@@ -18,7 +18,7 @@ keystore.o:
 # Generate a shared library
 shared: keystore.o $(SRC_DIR)/jcalltracer.cpp
 	g++ -fpermissive $(INCLUDES) -fPIC -c -DMAX_THREADS=1000 -DJVMTI_TYPE=1 -g -Wall $(SRC_DIR)/jcalltracer.cpp
-	g++ -shared -o libcalltracer5.so jcalltracer.o keystore.o -ldb -lstdc++
+	g++ -shared -o libjct.so jcalltracer.o keystore.o -ldb -lstdc++
 
 tags:
 	rm -f TAGS
