@@ -1,5 +1,6 @@
 #include "jcalltracer.h"
 #include "keystore.h"
+#include "utils.h"
 
 #include <malloc.h>
 #include <stdio.h>
@@ -11,13 +12,9 @@
 
 static jvmtiEnv *g_jvmti_env;
 
-LOCK_TYPE SHARED_LOCK = 1;
-LOCK_TYPE EXCLUSIVE_LOCK = 2;
 LOCK_OBJECT classAccess = 0;
 LOCK_OBJECT callTraceAccess = 0;
 LOCK_OBJECT assignThreadAccess = 0;
-
-int callThershold = -1;
 
 char **incFilters;
 char **excFilters;
@@ -25,56 +22,10 @@ int incFilterLen = 0;
 int excFilterLen = 0;
 
 const char *traceFile = "call.trace";
-const char *output_type = "xml";
-
+FILE *logfile = NULL;
 std::map<char*, char *> options_map;
 
 jrawMonitorID monitor_lock;
-
-char* translateFilter(char* filter) {
-  char * c;
-  int i;
-  int tmp = 0;
-  while((c = strchr(filter, '.')) != NULL) {
-    *c = '/';
-    tmp = 1;
-  }
-  if(tmp == 1) {
-    tmp = strlen(filter);
-    filter = (char *)realloc(filter, ((++ tmp) * sizeof(char)));
-    for(i = tmp; i > 0; i--) {
-      filter[i] = filter[i - 1];
-    }
-    filter[0] = 'L';
-  }
-  return filter;
-}
-
-char* translateFilter1(char* filter) {
-  char * c;
-  while((c = strchr(filter, '.')) != NULL) {
-    *c = '/';
-  }
-  return filter;
-}
-
-char* translateFilter2(char* filter) {
-  char * c;
-  int i;
-  int tmp = 0;
-  while((c = strchr(filter, '/')) != NULL) {
-    *c = '.';
-    tmp = 1;
-  }
-  if(tmp == 1) {
-    tmp = strlen(filter);
-    for(i = 0; i < tmp; i++) {
-      filter[i] = filter[i + 1];
-    }
-  }
-  return filter;
-}
-
 
 void setupFiltersFromString(char *value) {
   char *ptrfilter = strtok(value, "|");
@@ -155,6 +106,7 @@ void clearAllFilters() {
   for(i = 0; i < incFilterLen; i++) {
     clearFilter(incFilters[i]);
   }
+
   free(incFilters);
 
   for(i = 0; i < excFilterLen; i++) {
@@ -248,8 +200,8 @@ void addThreadEntry(KeyType key) {
 }
 
 void startup(char *options) {
-  printf("rootKey: %d \n", rootKey);
   setup(options);
+  fprintf(logfile, "rootKey: %d \n", rootKey);
   keystore_initialize("keystore.db", NULL);
   threadKeyIds.size = 0;
   updateThreadEntries();
@@ -261,8 +213,6 @@ void shutdown() {
 
 
 void setup(char* options) {
-
-  printf("Setting up libcalltracer5 ... ");
 
   excFilters = NULL;
   incFilters = NULL;
@@ -292,6 +242,11 @@ void setup(char* options) {
 
     if ( strcmp(key, "traceFile") == 0 ) {
       traceFile = strdup(value);
+      logfile = fopen(traceFile, "a+");
+      if(NULL == logfile) {
+	fprintf(stderr, "Failed to create logfile: %s", traceFile);
+	exit(-1);
+      }
     }
     else if ( strcmp(key, "filterList") == 0 ) {
       setupFiltersFromString(value);
@@ -299,38 +254,41 @@ void setup(char* options) {
     else if ( strcmp(key, "filterFile") == 0 ) {
       setupFiltersFromFile(value);
     }
-    else if ( strcmp(key, "outputType") == 0 ) {
-      output_type = strdup(value);
-    }
-    else if ( strcmp(key, "callThershold") == 0 ) {
-      callThershold = atoi(value);
-    }
+
   }
 
   monitor_lock = createMonitor("monitor_lock");
 
-  printf("DONE\n");
+  fprintf(logfile, "DONE\n");
 }
 
 int getLock(LOCK_TYPE lock, LOCK_OBJECT *lockObj) {
   switch (lock) {
-  case 1: getMonitor(monitor_lock); {
+
+  case SHARED_LOCK:
+    getMonitor(monitor_lock);
+    {
       if((*lockObj) > -1) {
 	(*lockObj) += 1;
       } else {
 	releaseMonitor(monitor_lock);
 	return -1;
       }
-    } releaseMonitor(monitor_lock);
+    }
+    releaseMonitor(monitor_lock);
     break;
-  case 2: getMonitor(monitor_lock); {
+    
+  case EXCLUSIVE_LOCK:
+    getMonitor(monitor_lock);
+    {
       if((*lockObj) == 0) {
 	(*lockObj) = -1;
       } else {
 	releaseMonitor(monitor_lock);
 	return -1;
       }
-    } releaseMonitor(monitor_lock);
+    }
+    releaseMonitor(monitor_lock);
     break;
   }
   return 1;
@@ -433,7 +391,7 @@ KeyStackPair * newThreadEntry(jthread thread) {
   KeyDegreeStack *stack = pair->stack;
   stack->push(new KeyDegreePair(pair->key, 0));
 
-  printf("Thread entry created: %d %p\n", threadId, thread);
+  fprintf(logfile, "Thread entry created: %d %p\n", threadId, thread);
   return pair;
 }
 
@@ -442,21 +400,21 @@ KeyStackPair * newThreadEntry(jthread thread) {
   since it modifieds a shared datastructure for thread entries
 */
 void threadCleanup(jthread thread) {
-  printf("Thread exiting: %p\n", thread);
+  fprintf(logfile, "Thread exiting: %p\n", thread);
   KeyStackPair *pair =  threads_map[thread];
   delete pair;
   threads_map.erase(thread);
 }
 
 void printAllThreads() {
-  printf("All threads:\n");
+  fprintf(logfile, "All threads:\n");
   for(std::map<jthread, KeyStackPair*>::iterator iter
 	= threads_map.begin();
       iter !=threads_map.end();
       iter++) {
     jthread thread = iter->first;
     KeyStackPair *pair = iter->second;
-    printf(" key: %p , val: %d, stack: %p\n",
+    fprintf(logfile, " key: %p , val: %d, stack: %p\n",
 	   thread, pair->key, pair->stack);
   }
 }
@@ -528,11 +486,18 @@ void JNICALL methodEntry(jvmtiEnv* jvmti_env, JNIEnv* jni_env,
       pair = threads_map[thread];
     }
 
-    printf("Method Entry: TID %d: %s / %s\n", pair->key, cn, mn);
-    KeyType node_key = nextKey();
+    fprintf(logfile, "Method Entry: TID %d: %s / %s\n", pair->key, cn, mn);
     KeyDegreeStack *stack = pair->stack;
-    printf(" Stack size: %ld\n", stack->size());
+
+    if(stack->empty()) {
+      stack->push(new KeyDegreePair(pair->key));
+    }
+
     KeyType parent_key = stack->top()->key;
+    KeyType node_key = nextKey();
+
+    fprintf(logfile, " Stack size: %ld\n", stack->size());
+    
     int order = ++(stack->top()->degree);
 
     int len_key = sizeof(parent_key);
@@ -573,7 +538,10 @@ void JNICALL methodEntry(jvmtiEnv* jvmti_env, JNIEnv* jni_env,
   releaseLock(SHARED_LOCK, &callTraceAccess);
 }
 
-void JNICALL methodExit(jvmtiEnv* jvmti_env, JNIEnv* jni_env, jthread thread, jmethodID method, jboolean was_popped_by_exception, jvalue return_value) {
+void JNICALL methodExit(jvmtiEnv* jvmti_env, JNIEnv* jni_env,
+			jthread thread, jmethodID method,
+			jboolean was_popped_by_exception,
+			jvalue return_value) {
 
     // obtain thread access lock
     while(getLock(SHARED_LOCK, &assignThreadAccess) == -1) { delay(10); }
@@ -597,13 +565,15 @@ void JNICALL methodExit(jvmtiEnv* jvmti_env, JNIEnv* jni_env, jthread thread, jm
     
     // only process the classes that are allowed
     if( passFilter(cn) == 1 ) {
-      printf("Method Exit: TID %d: %s / %s\n", threadId, cn, mn);
-      // printf("  Thread %p / Method %p\n", thread, method);
-      // printf("    Class: %s / %s\n", cn, gcn);
-      // printf("    Method: %s / %s / %s\n", mn, ms, gms);
+      fprintf(logfile, "Method Exit: TID %d: %s / %s\n", threadId, cn, mn);
+      // fprintf(logfile, "  Thread %p / Method %p\n", thread, method);
+      // fprintf(logfile, "    Class: %s / %s\n", cn, gcn);
+      // fprintf(logfile, "    Method: %s / %s / %s\n", mn, ms, gms);
       KeyDegreeStack *stack = pair->stack;
       if(! stack->empty() ) {
+	KeyDegreePair *pair = stack->top();
 	stack->pop();
+	delete pair;
       }
     }
 
@@ -625,7 +595,7 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *options, void *reserved) {
   jvmtiEventCallbacks callbacks;
   jvmtiEnv *jvmti;
 
-  printf("Loading agent: libcalltracer5 ...\n");
+  printf("libjct.so: setting up ...\n");
   
   rc = vm->GetEnv((void **)&jvmti, JVMTI_VERSION);
   if (rc != JNI_OK) {

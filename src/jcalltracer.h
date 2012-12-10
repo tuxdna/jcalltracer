@@ -9,13 +9,14 @@
 #define MAX_THREADS 1000
 #endif
 
-#define OPT_VAL_SEPARATOR "-"
-#define OPT_VAL_SEPARATOR_CHAR '-'
+#define OPT_VAL_SEPARATOR "="
+#define OPT_VAL_SEPARATOR_CHAR '='
 
 #define OPTIONS_SEPARATOR ","
 #define OPTIONS_SEPARATOR_CHAR ','
 
-typedef int LOCK_TYPE;
+enum LOCK_TYPE {SHARED_LOCK=1, EXCLUSIVE_LOCK=2};
+
 typedef int LOCK_OBJECT;
 
 typedef struct CTD {
@@ -38,9 +39,6 @@ typedef struct threadEntries {
 void setup(char* options);
 
 // process options
-char* translateFilter(char* filter) ;
-char* translateFilter1(char* filter) ;
-char* translateFilter2(char* filter) ;
 int passFilter(const char * input);
 void clearFilter(char *filter) ;
 void clearAllFilters() ;
@@ -52,33 +50,8 @@ void getMonitor(jrawMonitorID monitor);
 void releaseMonitor(jrawMonitorID monitor);
 void destroyMonitor(jrawMonitorID monitor);
 
-jthread getThreadId(int threadIdx) ;
-int getThreadIdx(jthread threadId, JNIEnv* jni_env);
 void printFullThreadTrace(jthread threadId, FILE *out, JNIEnv* jni_env);
 int assignThreadIdx(jthread threadId, JNIEnv* jni_env);
-
-CTD *newCallTrace();
-void releaseCallTrace(CTD* headNode);
-void releaseFullThreadTrace(jthread threadId, JNIEnv* jni_env);
-void releaseFullTrace(JNIEnv* jni_env);
-CTD *setCall(char* methodName, char* methodSignature, char* className,
-	     CTD* calledFrom, CTD* call, int threadIdx);
-CTD *endCall(jmethodID methodId, jthread threadId, JNIEnv* jni_env);
-CTD *newMethodCall(jmethodID methodId, jthread threadId, JNIEnv* jni_env);
-void printCallTrace(CTD* headNode, int depth, FILE *out);
-void printFullThreadTrace(jthread threadId, FILE *out, JNIEnv* jni_env);
-void printFullTrace(JNIEnv* jni_env);
-
-void delay(int i);
-jclass getMethodClass(jmethodID methodId);
-bool isSameThread(JNIEnv* jni_env, jthread threadId1, jthread threadId2);
-bool isSameClass(JNIEnv* jni_env, jclass classId1, jclass classId2);
-jthread getThreadRef(JNIEnv* jni_env, jthread threadId);
-jclass getClassRef(JNIEnv* jni_env, jclass classId);
-char* getClassName(jclass klass);
-char* getMethodName(jmethodID methodId);
-char* getMethodSignature(jmethodID methodId);
-int getMethodNameAndSignature(jmethodID id, char** name, char** signature);
 
 void JNICALL vmDeath(jvmtiEnv* jvmti_env, JNIEnv* jni_env);
 void JNICALL threadStart(jvmtiEnv *jvmti_env, JNIEnv* jni_env, jthread thread);

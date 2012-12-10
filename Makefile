@@ -1,4 +1,4 @@
-JDK_HOME = /usr/lib/jvm/java-6-openjdk
+JDK_HOME = /usr/lib/jvm/java-openjdk
 
 SRC_DIR = src
 

@@ -6,7 +6,7 @@ static int ret;
 static DBT bdb_key, bdb_data;
 
 void keystore_initialize(const char *dbfile, const char *dbname) {
-  printf("Initializing keystore %s:%s ...", dbfile, dbname);
+  // printf("Initializing keystore %s:%s ...", dbfile, dbname);
   if(!initialized) {
     
     if ((ret = db_create(&dbp, NULL, 0)) != 0) {
@@ -21,7 +21,7 @@ void keystore_initialize(const char *dbfile, const char *dbname) {
     }
 
     initialized = 1;
-    printf("DONE\n");
+    // printf("DONE\n");
   }
 }
 
