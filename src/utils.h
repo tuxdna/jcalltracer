@@ -1,3 +1,4 @@
+#include <malloc.h>
 #include <cstring>
 
 char* translateFilter(char* filter) {

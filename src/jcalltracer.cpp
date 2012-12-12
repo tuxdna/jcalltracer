@@ -1,11 +1,10 @@
 #include "jcalltracer.h"
-#include "keystore.h"
 #include "utils.h"
 
+#include <cstdio>
 #include <malloc.h>
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
+#include <cstring>
+#include <cstdlib>
 #include <map>
 #include <stack>
 #include <iostream>
@@ -24,7 +23,8 @@ int excFilterLen = 0;
 const char *traceFile = "call.trace";
 
 FILE *logfile = NULL;
-FILE *metafile = NULL;
+FILE *edges_file = NULL;
+FILE *threads_file = NULL;
 
 std::map<char*, char *> options_map;
 
@@ -187,47 +187,46 @@ public:
 };
 
 static KeyType rootKey = nextKey();
-static ThreadEntriesType threadKeyIds = {0};
 static std::map<jthread, KeyStackPair *> threads_map;
 
-void updateThreadEntries() {
-  keystore_put((void *)&rootKey, sizeof(KeyType),
-	       (void *)&threadKeyIds, sizeof(ThreadEntriesType)
-	       );
-}
-
 void addThreadEntry(KeyType key) {
-  int idx = threadKeyIds.size;
-  threadKeyIds.threads[idx] = key;
-  threadKeyIds.size ++;
+  fprintf(threads_file, "%d\n", key);
 }
 
 void startup(char *options) {
   setup(options);
   fprintf(logfile, "rootKey: %d \n", rootKey);
-  keystore_initialize("keystore.db", NULL);
 
-  metafile = fopen("edges.out", "w+");
-  if(NULL == metafile) {
-    fprintf(stderr, "Failed to create logfile: %s", traceFile);
+  const char *edges_filename = "edges.out";
+  edges_file = fopen(edges_filename, "w+");
+  if(NULL == edges_file) {
+    fprintf(stderr, "Failed to create edges file: %s", edges_filename);
     exit(-1);
   }
 
-  threadKeyIds.size = 0;
-  updateThreadEntries();
+  const char *threads_filename = "threads.out";
+  threads_file = fopen(threads_filename, "w+");
+  if(NULL == threads_file) {
+    fprintf(stderr, "Failed to create threads file: %s", threads_filename);
+    exit(-1);
+  }
+
 }
 
 void shutdown() {
   fprintf(logfile, "Shutting down\n");
 
-  keystore_destroy();
+  // close all the files that were opened
+  if(NULL != edges_file) {
+    fclose(edges_file);
+  }
 
-  if(NULL != metafile) {
-    fclose(metafile);
+  if(NULL != threads_file) {
+    fclose(threads_file);
   }
 
   if(NULL != logfile) {
-    fclose(metafile);
+    fclose(logfile);
   }
 }
 
@@ -403,7 +402,6 @@ KeyStackPair * newThreadEntry(jthread thread) {
   KeyType threadId = nextKey();
 
   addThreadEntry(threadId);
-  updateThreadEntries();
 
   KeyStackPair *pair = new KeyStackPair(threadId);
   threads_map[thread] = pair;
@@ -520,27 +518,7 @@ void JNICALL methodEntry(jvmtiEnv* jvmti_env, JNIEnv* jni_env,
     
     int order = ++(stack->top()->degree);
 
-    // int len_key = sizeof(parent_key);
-    // int len_order = sizeof(order);
-    // int len_mn = strlen(mn) + 1;
-    // int len_ms = strlen(ms) + 1;
-    // int len_cn = strlen(cn) + 1;
-
-    // int vsize = len_key + len_order + len_mn + len_ms + len_cn;
-
-    // char *value = (char*) malloc(vsize);
-    // char *curr = NULL;
-    // curr = value;
-    // memcpy( curr, &parent_key, len_key); curr += len_key;
-    // memcpy( curr, &order, len_order);  curr += len_order;
-    // memcpy( curr, mn, len_mn);         curr += len_mn;
-    // memcpy( curr, ms, len_ms);         curr += len_ms;
-    // memcpy( curr, cn, len_cn);
-
-    // keystore_put((void *)&node_key, sizeof(node_key),
-    // 		 (void *)value, vsize);
-
-    fprintf(metafile, "%d\t%d\t%d\t%s\t%s\t%s\n", node_key, parent_key, order, mn, ms, cn);
+    fprintf(edges_file, "%d\t%d\t%d\t%s\t%s\t%s\n", node_key, parent_key, order, mn, ms, cn);
 
     // free(value);
     stack->push(new KeyDegreePair(node_key));
@@ -596,7 +574,8 @@ void JNICALL methodExit(jvmtiEnv* jvmti_env, JNIEnv* jni_env,
       if(! stack->empty() ) {
 	KeyDegreePair *pair = stack->top();
 	stack->pop();
-	delete pair;
+	if(NULL != pair)
+	  delete pair;
       }
     }
 
