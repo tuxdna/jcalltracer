@@ -20,6 +20,19 @@ def print_tree(node, level)
   end
 end
 
+def print_tree_xml(node, level)
+  return if node.nil?
+  cnodes = node[:children]
+  cn, mn, ms = node[:metadata]
+  puts "  "*level + "<call>"
+  puts "  "*level + " <class><![CDATA[#{cn}]]></class>"
+  puts "  "*level + " <method><![CDATA[#{mn} #{ms}]]></method>"
+  cnodes.each do |child_node|
+    print_tree_xml(child_node, level+1)
+  end
+  puts "  "*level + "</call>"
+end
+
 def print_tree(node, level)
   return if node.nil?
   cnodes = node[:children]
@@ -40,7 +53,7 @@ File.open("threads.out").readlines.map {|l| l.chomp}.each do |tid|
   thread_subtree = []
   thread_node = {
     :key => tid,
-    :metadata => [],
+    :metadata => ["", "", ""],
     :order => 1,
     :children => thread_subtree
   }
@@ -72,6 +85,8 @@ end
 
 
 threads.each do |k,v|
+  # next if k != "15172"
   puts "thread: #{k}"
-  print_tree(v, 0)
+  # print_tree(v, 0)
+  print_tree_xml(v, 0)
 end
