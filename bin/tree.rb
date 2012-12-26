@@ -86,7 +86,8 @@ end
 
 threads.each do |k,v|
   # next if k != "15172"
-  puts "thread: #{k}"
+  puts "<Thread id=\"#{k}\""
   # print_tree(v, 0)
-  print_tree_xml(v, 0)
+  print_tree_xml(v, 1)
+  puts "</Thread>"
 end
