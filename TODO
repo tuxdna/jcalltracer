@@ -1,0 +1,4 @@
+Cleanup codebase
+Write output to xml files per thread
+Write SVG for each thread
+Automate the whole process
