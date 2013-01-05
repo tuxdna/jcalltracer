@@ -1,5 +1,6 @@
 /*
  * Copyright 2009 Syed Ali Jafar Naqvi
+ *           2013 Saleem Ansari <tuxdna@gmail.com>
  * 
  * This file is part of Java Call Tracer.
  *
@@ -25,8 +26,10 @@ import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
@@ -40,9 +43,16 @@ import java.util.regex.Pattern;
 
 import javax.imageio.ImageIO;
 
+import org.apache.batik.transcoder.TranscoderException;
 import org.apache.batik.transcoder.TranscoderInput;
 import org.apache.batik.transcoder.TranscoderOutput;
 import org.apache.batik.transcoder.image.JPEGTranscoder;
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.CommandLineParser;
+import org.apache.commons.cli.HelpFormatter;
+import org.apache.commons.cli.Options;
+import org.apache.commons.cli.ParseException;
+import org.apache.commons.cli.PosixParser;
 import org.apache.commons.lang.StringUtils;
 import org.apache.xerces.parsers.DOMParser;
 import org.w3c.dom.Document;
@@ -51,21 +61,28 @@ import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.w3c.dom.Text;
 import org.xml.sax.InputSource;
+import org.xml.sax.SAXException;
 
 public class Calltrace2Seq {
-    private static int nodeSep = 200;
-    private static int nodeSep1 = 50;
-    static int maxCallDepth = -1;
-    static int minCallDepth = -1;
-    static int totalDepth = 0;
-    static int pos = 0;
-    static int lastCnt = 0;
-    static int lastTxtLen = 0;
-    static String[] filters = new String[] {"L?([a-z0-9A-Z$]+)/",     "\\((([a-z0-9A-Z$]+\\.)*[a-z0-9A-Z$]+)",    "\\(\\[(([a-z0-9A-Z$]+\\.)*[a-z0-9A-Z$]+)",     ";(([a-z0-9A-Z$]+\\.)*[a-z0-9A-Z$]+)",      ";\\[(([a-z0-9A-Z$]+\\.)*[a-z0-9A-Z$]+)",       ";",    "\\)",      ":\\[(([a-z0-9A-Z$]+\\.)*[a-z0-9A-Z$]+)\\]"};
-    static String[] replace = new String[] {"$1\\.",                  "\\($1",                                    "\\($1\\[\\]",                                  ", $1",                                     ", $1\\[\\]",                                   "",     "\\) :",    ":$1\\[\\]\\]"};
-    static boolean back = false;
-    static boolean fwd = false;
-    static List<Integer> lastPos = new ArrayList<Integer>();
+	private static int nodeSep = 200;
+	private static int nodeSep1 = 50;
+	static int maxCallDepth = -1;
+	static int minCallDepth = -1;
+	static int totalDepth = 0;
+	static int pos = 0;
+	static int lastCnt = 0;
+	static int lastTxtLen = 0;
+	static String[] filters = new String[] { "L?([a-z0-9A-Z$]+)/",
+			"\\((([a-z0-9A-Z$]+\\.)*[a-z0-9A-Z$]+)",
+			"\\(\\[(([a-z0-9A-Z$]+\\.)*[a-z0-9A-Z$]+)",
+			";(([a-z0-9A-Z$]+\\.)*[a-z0-9A-Z$]+)",
+			";\\[(([a-z0-9A-Z$]+\\.)*[a-z0-9A-Z$]+)", ";", "\\)",
+			":\\[(([a-z0-9A-Z$]+\\.)*[a-z0-9A-Z$]+)\\]" };
+	static String[] replace = new String[] { "$1\\.", "\\($1", "\\($1\\[\\]",
+			", $1", ", $1\\[\\]", "", "\\) :", ":$1\\[\\]\\]" };
+	static boolean back = false;
+	static boolean fwd = false;
+	static List<Integer> lastPos = new ArrayList<Integer>();
 
     private static PrintStream printStream;
     static String packageTrimPattern = "([a-z0-9A-Z$]+\\.)+";
@@ -87,45 +104,80 @@ public class Calltrace2Seq {
         translate.put("C", "char");
         translate.put("J", "long");
     }
+
     static List<String> classes = new ArrayList<String>();
 
-    //There are the parameters that you can pass to this program
-    private static void setup(String[] args) {
-        boolean trimPackage = true;
-        for(int i = 0; i < args.length; i ++) {
-            String[] param = args[i].split("-");
-            if("TRIMPACKAGE".equalsIgnoreCase(param[0]) && "FALSE".equalsIgnoreCase(param[1])) {
-                trimPackage = false;
-            }
-            if("PACKAGETRIMPATTERN".equalsIgnoreCase(param[0]) && StringUtils.isNotEmpty(param[1]) && StringUtils.isNotBlank(param[1])) {
-                packageTrimPattern = param[1];
-            }
-            if("MAXCALLDEPTH".equalsIgnoreCase(param[0]) && StringUtils.isNumeric(param[1])) {
-                maxCallDepth = Integer.parseInt(param[1]) + 3;
-            }
-            if("MINCALLDEPTH".equalsIgnoreCase(param[0]) && StringUtils.isNumeric(param[1])) {
-                minCallDepth = Integer.parseInt(param[1]) + 3;
-            }
-            if("INPUTXMLFILE".equalsIgnoreCase(param[0]) && StringUtils.isNotEmpty(param[1]) && StringUtils.isNotBlank(param[1])) {
-                inputXMLFile = param[1];
-            }
-            if("OUTPUTFOLDER".equalsIgnoreCase(param[0]) && StringUtils.isNotEmpty(param[1]) && StringUtils.isNotBlank(param[1])) {
-                outputFolder = param[1];
-                if(outputFolder.lastIndexOf("/") != outputFolder.length() - 1 && outputFolder.lastIndexOf("\\") != outputFolder.length() - 1) {
-                    outputFolder += "/";
-                }
-            }
-            if("OUTPUTFILENAME".equalsIgnoreCase(param[0]) && StringUtils.isNotEmpty(param[1]) && StringUtils.isNotBlank(param[1])) {
-                outputFileName = param[1];
-                if(outputFolder.charAt(0) == '/' || outputFolder.charAt(0) == '\\') {
-                    outputFolder = outputFolder.substring(1);
-                }
-            }
-        }
-        if(!trimPackage) {
-            packageTrimPattern = "";
-        }
-    }
+    
+	/**
+	 * @param paths
+	 * @return Return a combined path of the parameters provided in a portable
+	 *         way.
+	 */
+	public static String joinPath(String... paths) {
+		File file = new File(paths[0]);
+
+		for (int i = 1; i < paths.length; i++) {
+			file = new File(file, paths[i]);
+		}
+
+		return file.getPath();
+	}
+
+
+	private static void setup(String[] args) {
+		// parse commandline parameters
+		Options opts = new Options();
+		opts.addOption("h", "help", false, "Display this help");
+		opts.addOption("t", "trim-package", false, "Trim package part of a qualified class");
+		opts.addOption("p", "trim-pattern", true,  "Package trim pattern");
+		opts.addOption("d", "max-call-depth", true,  "Max Call Depth");
+		opts.addOption("n", "min-call-depth", true,  "Min Call Depth");
+		opts.addOption("i", "input-xml-file", true, "Input XML File");
+		opts.addOption("o", "output-folder", true, "Output Folder");
+		opts.addOption("f", "output-file", true, "Output File Name");
+
+		CommandLineParser parser = new PosixParser();
+		CommandLine cmd = null;
+		try {
+			cmd = parser.parse(opts, args);
+		} catch (ParseException e) {
+			e.printStackTrace();
+			System.exit(1);
+		}
+		if (cmd.hasOption("h")) {
+			// automatically generate the help statement
+			HelpFormatter formatter = new HelpFormatter();
+			formatter.printHelp(Calltrace2Seq.class.getName(), opts);
+			System.exit(0);
+		}
+		
+		boolean trimPackage = false;
+
+		if (cmd.hasOption("d")) {
+			trimPackage = true;
+		}
+		if (cmd.hasOption("p")) {
+			packageTrimPattern = cmd.getOptionValue("p");
+		}
+		if (cmd.hasOption("d")) {
+			maxCallDepth = Integer.parseInt(cmd.getOptionValue("d")) + 3;
+		}
+		if (cmd.hasOption("n")) {
+			minCallDepth = Integer.parseInt(cmd.getOptionValue("n")) + 3;
+		}
+		if (cmd.hasOption("i")) {
+			inputXMLFile = cmd.getOptionValue("i");
+		}
+		if (cmd.hasOption("o")) {
+			outputFolder = cmd.getOptionValue("o");
+		}
+		if (cmd.hasOption("f")) {
+			outputFileName = cmd.getOptionValue("f");
+		}
+		if (!trimPackage) {
+			packageTrimPattern = "";
+		}
+	}
 
     private static void removeClintChild(NodeList nodes) {
         for (int i = 0; i < nodes.getLength(); i++) {
@@ -184,309 +236,406 @@ public class Calltrace2Seq {
 
     public static void main(String[] args) {
 
+  //      try {
+    	System.out.println("Calltrace2Seq\n");
+        setup(args);
+        DOMParser parser = new DOMParser();
+        String file = inputXMLFile;
         try {
-        	System.out.println("Calltrace2Seq\n");
-            setup(args);
-            DOMParser parser = new DOMParser();
-            String file = inputXMLFile;
-            parser.parse(new InputSource(new StringReader(applyRegExp(new File(file), filters, replace))));
-            Document doc = parser.getDocument();
-            removeDuplicateChild(doc.getChildNodes().item(0).getChildNodes());
-            removeClintChild(doc.getChildNodes().item(0).getChildNodes());
-            totalDepth = traverse(doc.getChildNodes(), 0);
-            traverse(doc.getChildNodes(), 1, 0);
-            svg = "<?xml version='1.0'?>\n" +
-		"<svg onclick='remove(evt)' onload='init(evt)' xmlns='http://www.w3.org/2000/svg' height='" + ((((2 * (totalDepth - 1)) + 1) * 20) + 75) + "' width='" + ((classes.size() * nodeSep) + 200) + "'>\n" + "<defs>\n" + 
-            "<style type='text/css'>\n" + "rect, line, path { stroke-width: 2; stroke: black }\n" + "text { font-weight: bold }\n" + "<marker orient='auto' refY='2.5' refX='4' markerHeight='5'\n" + "markerWidth='4' markerUnits='strokeWidth' id='mArrow'>\n" + "</marker>\n" + "</style>\n" +
-            "<script type='text/javascript'><![CDATA[" +
-            "var TrueCoords = null;" +
-            "var SVGDocument = null;" +
-            "var SVGRoot = null;" +
-            "var ClickPoint = null;\n" +
-            "function init(evt) {" +
-                "if ( window.svgDocument == null )" +
-                    "window.svgDocument = evt.target.ownerDocument;"+
-                "SVGDocument=window.svgDocument;" +
-                "SVGRoot=SVGDocument.documentElement;" +
-                "TrueCoords=SVGRoot.createSVGPoint();" +
-                "ClickPoint=SVGRoot.createSVGPoint();" +
-            "}\n"+
-            "function remove(evt) {" +
-                "if(evt.target.nodeName != 'rect') {" +
-                    "if(evt.target.nodeName == 'text' && evt.target.id == 'classTxt') {" +
-                    "} else {" +
-                        "ou=window.svgDocument.getElementById('affiche');" +
-                        "if(ou.firstChild != null) {" +
-                            "ou.removeChild(ou.firstChild);" +
-                        "}" +
-                        "texte=window.svgDocument.createTextNode('');" +
-                        "ou.appendChild(texte);" +
-                    "}" +
-                "}" +
-            "}\n" +
-            "function msOver(evt) {" +
-                "var transMatrix = evt.target.getCTM();" +
-                "GetTrueCoords(evt);" +
-                "if(typeof( window.pageYOffset ) == 'number') {" +
-                    "ClickPoint.x= TrueCoords.x - Number(transMatrix.e) + window.pageXOffset;" +
-                    "ClickPoint.y= TrueCoords.y - Number(transMatrix.f) + window.pageYOffset;" +
-                "}else if( SVGRoot.scrollLeft || SVGRoot.scrollTop ){" +
-                    "ClickPoint.x= TrueCoords.x - Number(transMatrix.e) + SVGRoot.scrollTop;" +
-                    "ClickPoint.y= TrueCoords.y - Number(transMatrix.f) + SVGRoot.scrollLeft;" +
-                "} else {" +
-                    "ClickPoint.x= TrueCoords.x - Number(transMatrix.e);" +
-                    "ClickPoint.y= TrueCoords.y - Number(transMatrix.f);" +
-                "}" +
-            "}\n" +
-            "function msClick(id, className, methodName) {" +
-                "root = window.svgDocument.getElementById(id);" +
-                "if(id == 'classTxt' || id == 'classRect') {" +
-                    "ClickPoint.y = 20;" +
-                "}" +
-                "texte='';" +
-                "if(methodName != '') {" +
-                    "texte=window.svgDocument.createTextNode(className + ' [' + methodName + ']');" +
-                "} else {" +
-                    "texte=window.svgDocument.createTextNode(className);" +
-                "}" +
-                "ou=window.svgDocument.getElementById('affiche');" +
-                "ou.setAttribute('x',ClickPoint.x);ou.setAttribute('y',ClickPoint.y);" +
-                "ou.setAttribute('style','text-anchor:middle;font-size:10;font-family:Arial;fill:red');" +
-                "ou.setAttribute('font-size','10');" +
-                "if(ou.firstChild != null) {" +
-                    "ou.removeChild(ou.firstChild);" +
-                "}" +
-                "ou.appendChild(texte);" +
-            "}\n" +
-            "function GetTrueCoords(evt) {" +
-                "var newScale = SVGRoot.currentScale;" +
-                "var translation = SVGRoot.currentTranslate;" +
-                "TrueCoords.x = (evt.clientX - translation.x)/newScale;" +
-                "TrueCoords.y = (evt.clientY - translation.y)/newScale;" +
-             "}\n" +
-            "]]></script>\n" +
-            "</defs>\n" + "<text font-family='Arial' font-variant='small-caps' font-weight='bold' font-size='11' x='5' y='15'>\n" + "Thread - " + doc.getFirstChild().getAttributes().getNamedItem("id").getFirstChild().getNodeValue() + "\n" + "</text>\n" + svg + "<text id='affiche'></text>\n</svg>\n";
-            FileWriter fileWriter = new FileWriter(new File(outputFolder + outputFileName + ".svg"));
-            fileWriter.write(svg);
-            fileWriter.flush();
-            fileWriter.close();
-            System.out.println("Generated the SVG file: " + new File(outputFolder + outputFileName + ".svg").getAbsolutePath());
-            printStream = new PrintStream(new File(outputFolder + outputFileName + ".trc"));
-            for (int i = 0; i < classes.size(); i++) {
-                String className = classes.get(i);
-                className = className.substring(className.lastIndexOf('.') + 1);
-                if (className.length() > 33) {
-                    className = className.substring(0, 29) + "...";
-                }
-                printStream.print(StringUtils.rightPad(className, nodeSep1));
-            }
+			parser.parse(new InputSource(new StringReader(applyRegExp(new File(file), filters, replace))));
+		} catch (SAXException e2) {
+			e2.printStackTrace();
+			System.exit(1);
+		} catch (IOException e2) {
+			e2.printStackTrace();
+			System.exit(1);
+		}
+
+        Document doc = parser.getDocument();
+        removeDuplicateChild(doc.getChildNodes().item(0).getChildNodes());
+        removeClintChild(doc.getChildNodes().item(0).getChildNodes());
+        totalDepth = traverse(doc.getChildNodes(), 0);
+        traverse(doc.getChildNodes(), 1, 0);
+        svg = "<?xml version='1.0'?>\n" +
+		"<svg onclick='remove(evt)' onload='init(evt)' " +
+		     "xmlns='http://www.w3.org/2000/svg' height='" + ((((2 * (totalDepth - 1)) + 1) * 20) + 75) + 
+		     "' width='" + ((classes.size() * nodeSep) + 200) + "'>\n" + "<defs>\n" + 
+	        "<style type='text/css'>\n" + "rect, line, path { stroke-width: 2; stroke: black }\n" + 
+		       "text { font-weight: bold }\n" + "<marker orient='auto' refY='2.5' refX='4' markerHeight='5'\n" +
+	           "markerWidth='4' markerUnits='strokeWidth' id='mArrow'>\n" + "</marker>\n" + "</style>\n" +
+	        "<script type='text/javascript'><![CDATA[" +
+		        "var TrueCoords = null;" +
+		        "var SVGDocument = null;" +
+		        "var SVGRoot = null;" +
+		        "var ClickPoint = null;\n" +
+		        "function init(evt) {" +
+		            "if ( window.svgDocument == null )" +
+		                "window.svgDocument = evt.target.ownerDocument;"+
+		            "SVGDocument=window.svgDocument;" +
+		            "SVGRoot=SVGDocument.documentElement;" +
+		            "TrueCoords=SVGRoot.createSVGPoint();" +
+		            "ClickPoint=SVGRoot.createSVGPoint();" +
+		        "}\n"+
+		        "function remove(evt) {" +
+		            "if(evt.target.nodeName != 'rect') {" +
+		                "if(evt.target.nodeName == 'text' && evt.target.id == 'classTxt') {" +
+		                "} else {" +
+		                    "ou=window.svgDocument.getElementById('affiche');" +
+		                    "if(ou.firstChild != null) {" +
+		                        "ou.removeChild(ou.firstChild);" +
+		                    "}" +
+		                    "texte=window.svgDocument.createTextNode('');" +
+		                    "ou.appendChild(texte);" +
+		                "}" +
+		            "}" +
+		        "}\n" +
+		        "function msOver(evt) {" +
+		            "var transMatrix = evt.target.getCTM();" +
+		            "GetTrueCoords(evt);" +
+		            "if(typeof( window.pageYOffset ) == 'number') {" +
+		                "ClickPoint.x= TrueCoords.x - Number(transMatrix.e) + window.pageXOffset;" +
+		                "ClickPoint.y= TrueCoords.y - Number(transMatrix.f) + window.pageYOffset;" +
+		            "}else if( SVGRoot.scrollLeft || SVGRoot.scrollTop ){" +
+		                "ClickPoint.x= TrueCoords.x - Number(transMatrix.e) + SVGRoot.scrollTop;" +
+		                "ClickPoint.y= TrueCoords.y - Number(transMatrix.f) + SVGRoot.scrollLeft;" +
+		            "} else {" +
+		                "ClickPoint.x= TrueCoords.x - Number(transMatrix.e);" +
+		                "ClickPoint.y= TrueCoords.y - Number(transMatrix.f);" +
+		            "}" +
+		        "}\n" +
+		        "function msClick(id, className, methodName) {" +
+		            "root = window.svgDocument.getElementById(id);" +
+		            "if(id == 'classTxt' || id == 'classRect') {" +
+		                "ClickPoint.y = 20;" +
+		            "}" +
+		            "texte='';" +
+		            "if(methodName != '') {" +
+		                "texte=window.svgDocument.createTextNode(className + ' [' + methodName + ']');" +
+		            "} else {" +
+		                "texte=window.svgDocument.createTextNode(className);" +
+		            "}" +
+		            "ou=window.svgDocument.getElementById('affiche');" +
+		            "ou.setAttribute('x',ClickPoint.x);ou.setAttribute('y',ClickPoint.y);" +
+		            "ou.setAttribute('style','text-anchor:middle;font-size:10;font-family:Arial;fill:red');" +
+		            "ou.setAttribute('font-size','10');" +
+		            "if(ou.firstChild != null) {" +
+		                "ou.removeChild(ou.firstChild);" +
+		            "}" +
+		            "ou.appendChild(texte);" +
+		        "}\n" +
+		        "function GetTrueCoords(evt) {" +
+		            "var newScale = SVGRoot.currentScale;" +
+		            "var translation = SVGRoot.currentTranslate;" +
+		            "TrueCoords.x = (evt.clientX - translation.x)/newScale;" +
+		            "TrueCoords.y = (evt.clientY - translation.y)/newScale;" +
+		         "}\n" +
+	        "]]></script>\n" +
+	        "</defs>\n" + "<text font-family='Arial' font-variant='small-caps' font-weight='bold' " +
+	        		"font-size='11' x='5' y='15'>\n" + "Thread - " + 
+	        		doc.getFirstChild().getAttributes().getNamedItem("id").getFirstChild().getNodeValue() + 
+	        		"\n" + "</text>\n" + svg + "<text id='affiche'></text>\n</svg>\n";
+
+        
+        File outputDirectory = new File(outputFolder);
+        if(! outputDirectory.exists()) {
+        	outputDirectory.mkdirs();
+        }
+
+		String svgFilePath = joinPath(outputFolder, outputFileName + ".svg");
+		File svgFile = new File(svgFilePath);
+		FileWriter fileWriter;
+		try {
+			fileWriter = new FileWriter(svgFile);
+			fileWriter.write(svg);
+			fileWriter.flush();
+			fileWriter.close();
+			System.out.println("Generated the SVG file: " + svgFile.getAbsolutePath());
+		} catch (IOException e1) {
+			System.out.println("SVG output failed: " + svgFile.getAbsolutePath());
+			e1.printStackTrace();
+		}
+        
+        try {			
+			String traceFilePath = joinPath(outputFolder
+					, outputFileName + ".trc");
+			File traceFile = new File(traceFilePath);
+			printStream = new PrintStream(traceFile);
+			for (int i = 0; i < classes.size(); i++) {
+				String className = classes.get(i);
+				className = className.substring(className.lastIndexOf('.') + 1);
+				if (className.length() > 33) {
+					className = className.substring(0, 29) + "...";
+				}
+				printStream.print(StringUtils.rightPad(className, nodeSep1));
+			}
             printStream.print("\n");
             traverse(doc.getChildNodes(), 2, 0);
             printStream.print("\n");
             printStream.close();
-            String result = applyRegExp(new File(outputFolder + outputFileName + ".trc"), new String[]{"\\s+\n"}, new String[]{"\n"});
-            File fout = new File(outputFolder + outputFileName + ".trc");
+            
+            String result = applyRegExp(traceFile, new String[]{"\\s+\n"}, new String[]{"\n"});
+
+            File fout = traceFile;
             FileOutputStream fos = new FileOutputStream(fout);
             BufferedWriter out = new BufferedWriter(new OutputStreamWriter(fos));
             out.write(result);
             out.close();
-            System.out.println("Generated the TRC file: " + new File(outputFolder + outputFileName + ".trc").getAbsolutePath());
-            try {
-                JPEGTranscoder transcoder = new JPEGTranscoder();
-                transcoder.addTranscodingHint(JPEGTranscoder.KEY_XML_PARSER_CLASSNAME, "org.apache.crimson.parser.XMLReaderImpl");
-                transcoder.addTranscodingHint(JPEGTranscoder.KEY_QUALITY, new Float(1.0));
-                TranscoderInput input = new TranscoderInput(new StringReader(svg));
-                OutputStream ostream = new FileOutputStream(outputFolder + outputFileName + ".jpg");
-                TranscoderOutput output = new TranscoderOutput(ostream);
-                transcoder.transcode(input, output);
-                ostream.close();
-            } catch (OutOfMemoryError ex) {
-                BufferedImage test = new BufferedImage(670, 50, BufferedImage.TYPE_INT_RGB);
-                Graphics2D g2 = test.createGraphics();
-                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                Font font = new Font("Courier", Font.BOLD, 10);
-                g2.setFont(font);
-                g2.drawString("The image was not generated because the JVM heap size is too low. Increase the heap size and try again.", 30, 30); 
-                ImageIO.write(test, "jpg", new File(outputFolder + outputFileName + ".jpg"));
-            }
-            System.out.println("Generated the JPG file: " + new File(outputFolder + outputFileName + ".jpg").getAbsolutePath());
-        } catch (Exception ex) {
+            System.out.println("Generated the TRC file: " + traceFile.getAbsolutePath());
+
+        } catch (IOException ex) {
+			System.out.println("TRC output failed: " + svgFile);
             ex.printStackTrace();
         }
+
+        
+		String jpegFilePath = joinPath(outputFolder, outputFileName + ".jpg");
+		File jpegFile = new File(jpegFilePath);
+		try {
+			JPEGTranscoder transcoder = new JPEGTranscoder();
+			transcoder.addTranscodingHint(
+					JPEGTranscoder.KEY_XML_PARSER_CLASSNAME,
+					"org.apache.crimson.parser.XMLReaderImpl");
+			transcoder.addTranscodingHint(JPEGTranscoder.KEY_QUALITY,
+					new Float(1.0));
+			TranscoderInput input = new TranscoderInput(new StringReader(svg));
+			OutputStream ostream = new FileOutputStream(jpegFilePath);
+			TranscoderOutput output = new TranscoderOutput(ostream);
+			transcoder.transcode(input, output);
+			ostream.close();
+			System.out.println("Generated the JPG file: "
+					+ jpegFile.getAbsolutePath());
+		} catch (OutOfMemoryError ex) {
+			BufferedImage test = new BufferedImage(670, 50,
+					BufferedImage.TYPE_INT_RGB);
+			Graphics2D g2 = test.createGraphics();
+			g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+					RenderingHints.VALUE_ANTIALIAS_ON);
+			Font font = new Font("Courier", Font.BOLD, 10);
+			g2.setFont(font);
+			g2.drawString(
+					"The image was not generated because the JVM heap size is too low. "
+							+ "Increase the heap size and try again.", 30, 30);
+			try {
+				ImageIO.write(test, "jpg", jpegFile);
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+			System.out.println("Generated the JPG file ( using 2D ): "
+					+ jpegFile.getAbsolutePath());
+		} catch (TranscoderException e) {
+			System.out.println("JPEG output failed"
+					+ jpegFile.getAbsolutePath());
+			e.printStackTrace();
+		} catch (FileNotFoundException e) {
+			System.out.println("JPEG output failed"
+					+ jpegFile.getAbsolutePath());
+			e.printStackTrace();
+		} catch (IOException e) {
+			System.out.println("JPEG output failed"
+					+ jpegFile.getAbsolutePath());
+			e.printStackTrace();
+		}
     }
 
-    public static String applyRegExp(File fin, String[] pattern, String[] replaceWith) {
-        String result = "";
-        try {
-            FileInputStream fis = new FileInputStream(fin);
-    
-            BufferedReader in = new BufferedReader(new InputStreamReader(fis));
-            String aLine = null;
-            while ((aLine = in.readLine()) != null) {
-                result += aLine + "\n";
-            }
-            in.close();
-            result = applyRegExp(result, pattern, replaceWith);
-        } catch (Exception e) {
-        }
-        return result;
-    }
+	public static String applyRegExp(File fin, String[] pattern,
+			String[] replaceWith) {
+		String result = "";
+		try {
+			FileInputStream fis = new FileInputStream(fin);
 
-    public static String applyRegExp(String input, String[] pattern, String[] replaceWith) {
-        String result = input;
-        try {
-            Object[] keys = translate.keySet().toArray();
-            for(int j = 0; j < 10; j ++) {
-                for(int i = 0; i < keys.length; i ++) {
-                    result = result.replaceAll("([;\\[\\(\\)])" + keys[i] + "([IVDFSBZCJ]*[\\)L\\[\\]])", "$1" + translate.get(keys[i]) + ";$2");
-                }
-            }
-            for(int i = 0; i < pattern.length; i++) {
-                Pattern p = Pattern.compile(pattern[i]);
-                Matcher m = p.matcher("");
-                m.reset(result);
-                result = m.replaceAll(replaceWith[i]);
-            }
-        } catch (Exception e) {
-        }
-        return result;
-    }
+			BufferedReader in = new BufferedReader(new InputStreamReader(fis));
+			String aLine = null;
+			while ((aLine = in.readLine()) != null) {
+				result += aLine + "\n";
+			}
+			in.close();
+			result = applyRegExp(result, pattern, replaceWith);
+		} catch (Exception e) {
+		}
+		return result;
+	}
 
-    private static void traverse(NodeList nodes, int type, int cnt) {
-        for (int i = 0; i < nodes.getLength(); i++) {
-            Node node = nodes.item(i);
-            if (node instanceof Text) {
-                switch (type) {
-                case 1:
-                    parse(node, cnt);
-                    break;
-                case 2:
-                    process(node, cnt);
-                }
-            } else {
-                traverse(node.getChildNodes(), type, cnt + 1);
-            }
-        }
-    }
+	public static String applyRegExp(String input, String[] pattern,
+			String[] replaceWith) {
+		String result = input;
+		try {
+			Object[] keys = translate.keySet().toArray();
+			for (int j = 0; j < 10; j++) {
+				for (int i = 0; i < keys.length; i++) {
+					result = result.replaceAll("([;\\[\\(\\)])" + keys[i]
+							+ "([IVDFSBZCJ]*[\\)L\\[\\]])",
+							"$1" + translate.get(keys[i]) + ";$2");
+				}
+			}
+			for (int i = 0; i < pattern.length; i++) {
+				Pattern p = Pattern.compile(pattern[i]);
+				Matcher m = p.matcher("");
+				m.reset(result);
+				result = m.replaceAll(replaceWith[i]);
+			}
+		} catch (Exception e) {
+		}
+		return result;
+	}
 
-    //Method that generates the TRC file
-    private static boolean process(Node node, int cnt) {
-        if (node.getParentNode().getNodeName().equalsIgnoreCase("class")) {
-            if (classes.indexOf(((Text) node).getNodeValue()) == 0 && cnt == 3) {
-                printStream.print("\n\n");
-                printStream.print(StringUtils.leftPad("", classes.size() * nodeSep1, "*"));
-                printStream.print("\n\n");
-            }
-            if ((maxCallDepth == -1 || maxCallDepth >= cnt) && (minCallDepth == -1 || minCallDepth <= cnt)) {
-                if (lastCnt >= cnt) {
-                    printStream.print("  [return]");
-                    printStream.print("\n");
-                    int offset = 0;
-                    if (!lastPos.isEmpty() && cnt - 4 >= 0) {
-                        offset = lastPos.get(cnt - 4);
-                    }
-                    printStream.print(StringUtils.leftPad("", offset * nodeSep1));
-                    for (int i = 0; i < (classes.indexOf(((Text) node).getNodeValue()) - offset - 1) * nodeSep1; i++) {
-                        printStream.print("-");
-                    }
-                    for (int i = 0; classes.indexOf(((Text) node).getNodeValue()) - offset > 0 && i < nodeSep1 / 2; i++) {
-                        printStream.print("-");
-                    }
-                    printStream.print("(" + (cnt - 1) + ">");
-                    for (int i = 0; classes.indexOf(((Text) node).getNodeValue()) - offset > 0 && i < (nodeSep1 / 2) - 4; i++) {
-                        printStream.print("-");
-                    }
-                    printStream.print(">");
-                } else if (pos >= classes.indexOf(((Text) node).getNodeValue())) {
-                    printStream.print("\n");
-                    printStream.print(StringUtils.leftPad("", (classes.indexOf(((Text) node).getNodeValue()) * nodeSep1)));
-                    if (pos > classes.indexOf(((Text) node).getNodeValue()))
-                        back = true;
-                } else if (classes.indexOf(((Text) node).getNodeValue()) - pos >= 1) {
-                    fwd = true;
-                }
-            }
-            pos = classes.indexOf(((Text) node).getNodeValue());
-            lastCnt = cnt;
-            if (lastPos.size() > cnt - 3) {
-                lastPos.remove(cnt - 3);
-            }
-            if (lastPos.size() > cnt - 3) {
-                lastPos.add(cnt - 3, pos);
-            } else {
-                lastPos.add(pos);
-            }
-        } else if (node.getParentNode().getNodeName().equalsIgnoreCase("method")) {
-            if ((maxCallDepth == -1 || maxCallDepth >= cnt) && (minCallDepth == -1 || minCallDepth <= cnt)) {
-                String method = ((Text) node).getNodeValue().replaceAll(packageTrimPattern, "");
-                int len = method.length() < 40 ? method.length() : 40;
-                String txt = cnt + "-" + method.substring(0, len);
-                int offset = 0;
-                if (!lastPos.isEmpty() && cnt - 4 >= 0) {
-                    offset = lastPos.get(cnt - 4);
-                }
-                if (fwd) {
-                    if(lastPos.size() > (cnt - 3)) {
-                        printStream.print(StringUtils.leftPad("", ((lastPos.get(cnt - 3) - offset) * nodeSep1) - lastTxtLen - 1, "-"));
-                    }
-                    printStream.print(">");
-                }
-                printStream.print(txt);
-                lastTxtLen = txt.length();
-                if (back) {
-                    printStream.print("<");
-                    for (int i = 0; i < nodeSep1 - txt.length(); i++) {
-                        printStream.print("-");
-                    }
-                    printStream.print("<" + (cnt - 1) + ")");
-                    for (int i = 0; i < ((offset - pos - 1) * nodeSep1) + (nodeSep1 / 4); i++) {
-                        printStream.print("-");
-                    }
-                    printStream.print("\n");
-                    printStream.print(StringUtils.leftPad("", ((pos) * nodeSep1)));
-                    for (int i = 0; i < (nodeSep1 / 2) - 2; i++) {
-                        printStream.print("-");
-                    }
-                    printStream.print("(" + (cnt) + ">");
-                    for (int i = 0; i < (nodeSep1 / 2) - 2; i++) {
-                        printStream.print("-");
-                    }
-                    printStream.print(">");
-                }
-            }
-            back = false;
-            fwd = false;
-            return true;
-        }
-        return false;
-    }
+	private static void traverse(NodeList nodes, int type, int cnt) {
+		for (int i = 0; i < nodes.getLength(); i++) {
+			Node node = nodes.item(i);
+			if (node instanceof Text) {
+				switch (type) {
+				case 1:
+					parse(node, cnt);
+					break;
+				case 2:
+					process(node, cnt);
+				}
+			} else {
+				traverse(node.getChildNodes(), type, cnt + 1);
+			}
+		}
+	}
 
-    private static int traverse(NodeList nodes, int depth) {
-        for (int i = 0; i < nodes.getLength(); i++) {
-            Node node = nodes.item(i);
-            if (node instanceof Text && node.getParentNode().getNodeName().equalsIgnoreCase("class")) {
-                depth++;
-            }
-            depth = traverse(node.getChildNodes(), depth);
-        }
-        return depth;
-    }
+	// Method that generates the TRC file
+	private static boolean process(Node node, int cnt) {
+		if (node.getParentNode().getNodeName().equalsIgnoreCase("class")) {
+			if (classes.indexOf(((Text) node).getNodeValue()) == 0 && cnt == 3) {
+				printStream.print("\n\n");
+				printStream.print(StringUtils.leftPad("", classes.size()
+						* nodeSep1, "*"));
+				printStream.print("\n\n");
+			}
+			if ((maxCallDepth == -1 || maxCallDepth >= cnt)
+					&& (minCallDepth == -1 || minCallDepth <= cnt)) {
+				if (lastCnt >= cnt) {
+					printStream.print("  [return]");
+					printStream.print("\n");
+					int offset = 0;
+					if (!lastPos.isEmpty() && cnt - 4 >= 0) {
+						offset = lastPos.get(cnt - 4);
+					}
+					printStream.print(StringUtils
+							.leftPad("", offset * nodeSep1));
+					for (int i = 0; i < (classes.indexOf(((Text) node)
+							.getNodeValue()) - offset - 1)
+							* nodeSep1; i++) {
+						printStream.print("-");
+					}
+					for (int i = 0; classes.indexOf(((Text) node)
+							.getNodeValue()) - offset > 0
+							&& i < nodeSep1 / 2; i++) {
+						printStream.print("-");
+					}
+					printStream.print("(" + (cnt - 1) + ">");
+					for (int i = 0; classes.indexOf(((Text) node)
+							.getNodeValue()) - offset > 0
+							&& i < (nodeSep1 / 2) - 4; i++) {
+						printStream.print("-");
+					}
+					printStream.print(">");
+				} else if (pos >= classes.indexOf(((Text) node).getNodeValue())) {
+					printStream.print("\n");
+					printStream
+							.print(StringUtils.leftPad("",
+									(classes.indexOf(((Text) node)
+											.getNodeValue()) * nodeSep1)));
+					if (pos > classes.indexOf(((Text) node).getNodeValue()))
+						back = true;
+				} else if (classes.indexOf(((Text) node).getNodeValue()) - pos >= 1) {
+					fwd = true;
+				}
+			}
+			pos = classes.indexOf(((Text) node).getNodeValue());
+			lastCnt = cnt;
+			if (lastPos.size() > cnt - 3) {
+				lastPos.remove(cnt - 3);
+			}
+			if (lastPos.size() > cnt - 3) {
+				lastPos.add(cnt - 3, pos);
+			} else {
+				lastPos.add(pos);
+			}
+		} else if (node.getParentNode().getNodeName()
+				.equalsIgnoreCase("method")) {
+			if ((maxCallDepth == -1 || maxCallDepth >= cnt)
+					&& (minCallDepth == -1 || minCallDepth <= cnt)) {
+				String method = ((Text) node).getNodeValue().replaceAll(
+						packageTrimPattern, "");
+				int len = method.length() < 40 ? method.length() : 40;
+				String txt = cnt + "-" + method.substring(0, len);
+				int offset = 0;
+				if (!lastPos.isEmpty() && cnt - 4 >= 0) {
+					offset = lastPos.get(cnt - 4);
+				}
+				if (fwd) {
+					if (lastPos.size() > (cnt - 3)) {
+						printStream.print(StringUtils.leftPad("",
+								((lastPos.get(cnt - 3) - offset) * nodeSep1)
+										- lastTxtLen - 1, "-"));
+					}
+					printStream.print(">");
+				}
+				printStream.print(txt);
+				lastTxtLen = txt.length();
+				if (back) {
+					printStream.print("<");
+					for (int i = 0; i < nodeSep1 - txt.length(); i++) {
+						printStream.print("-");
+					}
+					printStream.print("<" + (cnt - 1) + ")");
+					for (int i = 0; i < ((offset - pos - 1) * nodeSep1)
+							+ (nodeSep1 / 4); i++) {
+						printStream.print("-");
+					}
+					printStream.print("\n");
+					printStream.print(StringUtils.leftPad("",
+							((pos) * nodeSep1)));
+					for (int i = 0; i < (nodeSep1 / 2) - 2; i++) {
+						printStream.print("-");
+					}
+					printStream.print("(" + (cnt) + ">");
+					for (int i = 0; i < (nodeSep1 / 2) - 2; i++) {
+						printStream.print("-");
+					}
+					printStream.print(">");
+				}
+			}
+			back = false;
+			fwd = false;
+			return true;
+		}
+		return false;
+	}
 
-    private static int traverse(Node node, String className, int depth) {
-        if (node == null) {
-            return depth;
-        }
-        Node temp = null;
-        try {
-            temp = node.getFirstChild().getNextSibling().getFirstChild();
-        } catch (Exception e) {
-        }
-        if (temp instanceof Text && ((Text) temp).getNodeValue().equalsIgnoreCase(className)) {
-            depth++;
-        }
-        depth = traverse(node.getParentNode(), className, depth);
-        return depth;
-    }
+	private static int traverse(NodeList nodes, int depth) {
+		for (int i = 0; i < nodes.getLength(); i++) {
+			Node node = nodes.item(i);
+			if (node instanceof Text
+					&& node.getParentNode().getNodeName()
+							.equalsIgnoreCase("class")) {
+				depth++;
+			}
+			depth = traverse(node.getChildNodes(), depth);
+		}
+		return depth;
+	}
+
+	private static int traverse(Node node, String className, int depth) {
+		if (node == null) {
+			return depth;
+		}
+		Node temp = null;
+		try {
+			temp = node.getFirstChild().getNextSibling().getFirstChild();
+		} catch (Exception e) {
+		}
+		if (temp instanceof Text
+				&& ((Text) temp).getNodeValue().equalsIgnoreCase(className)) {
+			depth++;
+		}
+		depth = traverse(node.getParentNode(), className, depth);
+		return depth;
+	}
 
     //Method that generates SVG output
     private static void parse(Node node, int cnt) {
