@@ -1,4 +1,4 @@
-JDK_HOME = /usr/lib/jvm/java-6-openjdk
+JDK_HOME := $(JDK_HOME)
 
 SRC_DIR = src
 
@@ -6,12 +6,10 @@ INCLUDES = -I$(SRC_DIR) -I$(JDK_HOME)/include -I$(JDK_HOME)/include/linux
 
 all: shared java test
 	mv src/libjct.so .
+	cd java; ant jar
 
 test:
 	cd test-src; make
-
-java:
-	cd java; make
 
 # Generate a shared library
 shared: 
@@ -24,6 +22,7 @@ tags:
 
 clean:
 	cd src; make clean
+	cd java; ant clean
 	rm -f *.so *.o
 docs:
 	maruku README.md

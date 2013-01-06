@@ -18,17 +18,16 @@ How to build?
     $ make
 
 
- * This is your agent: libcalltracer5.so
+ * This is your agent: libjct.so
 
-    $ java -agentpath:./libcalltracer5.so com.test.HelloWorld
+    $ java -agentpath:./libjct.so com.test.HelloWorld
 
 
  * Testing the agent
 
     $ javac test-src/com/test/HelloWorld.java
-    $ java -agentpath:./libcalltracer5.so=traceFile-./call.trace,filterFile-./filters.txt,outputType-xml,usage-uncontrolled -cp test-src com.test.HelloWorld
-
-    Loading agent: libcalltracer5
+    $ java -agentpath:./libjct.so=filterList=com.test,traceFile=calltrace.log -cp test-src com.test.HelloWorld
+    Loading agent: libjct
     
     Hello World!
     
