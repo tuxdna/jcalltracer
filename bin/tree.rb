@@ -9,40 +9,41 @@
 # }
 
 
-def print_tree(node, level)
-  return if node.nil?
-  cnodes = node[:children]
-  return if cnodes.length == 0
+# def print_tree(node, level)
+#   return if node.nil?
+#   cnodes = node[:children]
+#   return if cnodes.length == 0
 
-  puts "  "*level+node[:metadata].join(", ")
-  cnodes.each do |child_node|
-    print_tree(child_node, level+1)
-  end
-end
+#   puts "  "*level+node[:metadata].join(", ")
+#   cnodes.each do |child_node|
+#     print_tree(child_node, level+1)
+#   end
+# end
 
-def print_tree_xml(node, level)
+# def print_tree(node, level)
+#   return if node.nil?
+#   cnodes = node[:children]
+#   return if cnodes.length == 0
+
+#   puts "  "*level+node[:metadata].join(", ")
+#   cnodes.each do |child_node|
+#     print_tree(child_node, level+1)
+#   end
+# end
+
+def print_tree_xml(file, node, level)
   return if node.nil?
   cnodes = node[:children]
   cn, mn, ms = node[:metadata]
-  puts "  "*level + "<call>"
-  puts "  "*level + " <class><![CDATA[#{cn}]]></class>"
-  puts "  "*level + " <method><![CDATA[#{mn} #{ms}]]></method>"
+  file.puts "  "*level + "<call>"
+  file.puts "  "*level + " <class><![CDATA[#{cn}]]></class>"
+  file.puts "  "*level + " <method><![CDATA[#{mn} #{ms}]]></method>"
   cnodes.each do |child_node|
-    print_tree_xml(child_node, level+1)
+    print_tree_xml(file, child_node, level+1)
   end
-  puts "  "*level + "</call>"
+  file.puts "  "*level + "</call>"
 end
 
-def print_tree(node, level)
-  return if node.nil?
-  cnodes = node[:children]
-  return if cnodes.length == 0
-
-  puts "  "*level+node[:metadata].join(", ")
-  cnodes.each do |child_node|
-    print_tree(child_node, level+1)
-  end
-end
 
 threads = {}
 
@@ -85,9 +86,12 @@ end
 
 
 threads.each do |k,v|
-  # next if k != "15172"
-  puts "<Thread id=\"#{k}\""
+  output_file = "thread-#{k}.xml"
+  puts "Generating: #{output_file} ..."
+  file = File.new(output_file, "w")
+  file.puts "<Thread id=\"#{k}\">"
   # print_tree(v, 0)
-  print_tree_xml(v, 1)
-  puts "</Thread>"
+  print_tree_xml(file, v, 1)
+  file.puts "</Thread>"
+  file.close();
 end

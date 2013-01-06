@@ -23,6 +23,7 @@ tags:
 clean:
 	cd src; make clean
 	cd java; ant clean
+	cd test-src; make clean
 	rm -f *.so *.o
 docs:
 	maruku README.md
