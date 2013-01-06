@@ -1,15 +1,15 @@
 How to build ?
 
-     $ make
+    $ ant jar
 
 How to run?
 
-     $ java -cp `echo third-party-libs/*.jar | tr ' ' :`:src/ Calltrace2Seq
+    $ java -jar dist/calltrace2seq.jar -i input.xml -o output/
 
 Example:
 
-    $ java -cp `echo third-party-libs/*.jar | tr ' ' :`:src/ Calltrace2Seq INPUTXMLFILE-/tmp/calltrace.xml  OUTPUTFILENAME-output
-    Generated the SVG file: /tmp/./output.svg
-    Generated the TRC file: /tmp/./output.trc
-    Generated the JPG file: /tmp/./output.jpg
+    $ java -jar dist/calltrace2seq.jar -i input.xml -o output/
+    Generated the SVG file: output/calltrace.svg
+    Generated the TRC file: output/calltrace.trc
+    Generated the JPG file: output/calltrace.jpg
 
