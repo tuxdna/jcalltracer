@@ -418,7 +418,6 @@ public class Calltrace2Seq {
 			try {
 				ImageIO.write(test, "jpg", jpegFile);
 			} catch (IOException e) {
-				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}
 			System.out.println("Generated the JPG file ( using 2D ): "
